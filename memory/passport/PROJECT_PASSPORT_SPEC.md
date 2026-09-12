@@ -24,7 +24,7 @@ The Project Passport must help the agent understand which project it is working 
 
 ---
 
-## 2. Core Principle
+## 2. Core Principles
 
 Every managed project must have a unique and stable project identity.
 
@@ -40,8 +40,11 @@ The passport must be:
 - Privacy-aware
 - Security-aware
 - Migration-friendly
+- Auditable
 
 The passport must never contain unnecessary secrets.
+
+The passport must represent known project facts and must not contain invented information.
 
 ---
 
@@ -62,6 +65,8 @@ Each project should have:
 - Project status
 
 The Project ID must remain stable for the lifetime of the project.
+
+Project identity must not be silently changed because of a conversation reset, provider change, build failure, or migration.
 
 ---
 
