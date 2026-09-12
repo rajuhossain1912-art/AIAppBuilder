@@ -1,0 +1,48 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android Studio
+.idea/
+*.iml
+.externalNativeBuild/
+.cxx/
+
+# Local configuration
+local.properties
+
+# Generated files
+captures/
+
+# APK/AAB build artifacts
+*.apk
+*.aab
+
+# Signing files
+*.jks
+*.keystore
+*.p12
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.secret
+secrets/
+credentials/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor backup files
+*~
+*.swp
+*.swo
