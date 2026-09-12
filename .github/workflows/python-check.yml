@@ -1,0 +1,41 @@
+name: AIAppBuilder Python Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python sources
+        run: python -m compileall -q agent memory
+      - name: Run lightweight import checks
+        run: python - <<'PY'
+from agent.pipeline import AgentPipeline
+from agent.generation import GenerationEngine, GenerationManifest
+from agent.review import ReviewEngine
+from agent.verification import VerificationExecutor
+from agent.build import BuildEngine
+from agent.test import TestEngine
+from agent.delivery import DeliveryEngine, DeliveryGate
+
+result = AgentPipeline().intake('Create an accessible offline and online Android app')
+assert result.plan.build_required
+assert result.plan.test_required
+GenerationEngine().validate_manifest(GenerationManifest('ci-project', 'ci-session'))
+assert ReviewEngine() is not None
+assert VerificationExecutor() is not None
+assert BuildEngine() is not None
+assert TestEngine() is not None
+assert DeliveryEngine().prepare(DeliveryGate()).status == 'BLOCKED'
+print('AIAppBuilder core imports and gates OK')
+PY
