@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Run lifecycle release-cycle tests
+        run: python -m unittest agent.orchestrator.test_release_cycle -v
+
       - name: Generate feature-complete CI app through pipeline
         run: |
           python - <<'PY'
@@ -26,6 +29,7 @@ jobs:
           from agent.verification import (
               AndroidAccessibilityVerifier,
               AndroidCompletenessVerifier,
+              AndroidCompatibilityVerifier,
               CompletenessStatus,
               VerificationStatus,
           )
@@ -47,6 +51,8 @@ jobs:
           assert accessibility.final_status == VerificationStatus.VERIFIED
           completeness = AndroidCompletenessVerifier().verify_project('ci-project', generated.project.root)
           assert completeness.status == CompletenessStatus.VERIFIED, completeness.findings
+          compatibility = AndroidCompatibilityVerifier().verify_project('ci-project', generated.project.root)
+          assert compatibility.final_status == VerificationStatus.VERIFIED
           PY
 
       - name: Set up Java
