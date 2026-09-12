@@ -97,13 +97,34 @@ jobs:
         working-directory: build/ci-android-app
         run: gradle --no-daemon :app:assembleDebug
 
+      - name: Run Android unit tests and lint
+        working-directory: build/ci-android-app
+        run: |
+          gradle --no-daemon :app:testDebugUnitTest :app:lintDebug
+
       - name: Verify APK exists
-        run: test -f build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+        run: test -s build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Verify APK package metadata and signature
+        run: |
+          APK="build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -maxdepth 1 -mindepth 1 -type d | sort -V | tail -1)"
+          test -n "$BUILD_TOOLS"
+          test -x "$BUILD_TOOLS/apksigner"
+          test -x "$BUILD_TOOLS/aapt2"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          "$BUILD_TOOLS/aapt2" dump badging "$APK" | grep -q "package:"
+
+      - name: Record APK SHA-256
+        run: |
+          sha256sum build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk | tee build/ci-android-app/app-debug.apk.sha256
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: aiappbuilder-ci-debug-apk
-          path: build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+            build/ci-android-app/app-debug.apk.sha256
 
 # CI trigger verification: keep Android generator/build checks active on main.
