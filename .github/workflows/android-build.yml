@@ -1,0 +1,58 @@
+name: AIAppBuilder Android Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  android-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Generate verified starter project
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from agent.android import AndroidProjectGenerator
+          from agent.templates.android_template import AndroidProjectSpec
+
+          spec = AndroidProjectSpec(
+              project_name='CI Build App',
+              package_name='com.example.cibuildapp',
+              mode='hybrid',
+          )
+          AndroidProjectGenerator().generate(Path('build/ci-android-app'), spec)
+          PY
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        working-directory: build/ci-android-app
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify APK exists
+        run: test -f build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiappbuilder-ci-debug-apk
+          path: build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
