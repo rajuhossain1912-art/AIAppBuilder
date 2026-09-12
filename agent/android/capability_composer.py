@@ -170,7 +170,10 @@ class AndroidCapabilityComposer:
             "general": "General application",
         }
         name = capability if capability in labels else "general"
-        variable = name.replace("-", "_")
+        # Use the actual capability key for the Java local name. This prevents
+        # unknown capabilities (which fall back to the General label) from
+        # colliding with an explicit general capability.
+        variable = "section_" + "".join(character if character.isalnum() else "_" for character in capability)
         block = f'''TextView {variable} = label("{labels[name]}");
         root.addView({variable});'''
 
