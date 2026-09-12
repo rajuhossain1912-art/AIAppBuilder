@@ -1,0 +1,116 @@
+name: AIAppBuilder Agent Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Project identifier (letters, numbers, hyphen, underscore)'
+        required: true
+        default: 'client-project'
+        type: string
+      request:
+        description: 'Application request in Bangla, Banglish, English, or mixed language'
+        required: true
+        type: string
+      action:
+        description: 'review first, or generate after you have approved the reviewed requirements'
+        required: true
+        default: 'review'
+        type: choice
+        options:
+          - review
+          - generate
+      approved:
+        description: 'Explicit approval for source generation'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse client-data execution on a public repository
+        if: ${{ github.event.repository.private == false }}
+        run: |
+          echo 'AIAppBuilder must be in a private GitHub repository before client requests or persistent runtime state are used.'
+          echo 'Change repository visibility to Private, then run this workflow again.'
+          exit 1
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Python checks
+        run: python -m unittest discover -s agent -p 'test_*.py' -v
+
+      - name: Review request
+        if: ${{ inputs.action == 'review' }}
+        run: |
+          python -m agent.entrypoint \
+            --project-id "${{ inputs.project_id }}" \
+            --state-root "memory/runtime" \
+            intake "${{ inputs.request }}"
+
+      - name: Generate approved Android source
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        run: |
+          python -m agent.entrypoint \
+            --project-id "${{ inputs.project_id }}" \
+            --state-root "memory/runtime" \
+            --work-root "build/agent-work" \
+            intake "${{ inputs.request }}"
+          python -m agent.entrypoint \
+            --project-id "${{ inputs.project_id }}" \
+            --state-root "memory/runtime" \
+            --work-root "build/agent-work" \
+            generate --approve
+
+      - name: Build generated Android project
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Set up Java for Android build
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Assemble generated debug APK
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        working-directory: build/agent-work/${{ inputs.project_id }}
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Upload generated project and APK
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiappbuilder-${{ inputs.project_id }}
+          path: |
+            build/agent-work/${{ inputs.project_id }}/
+            memory/runtime/${{ inputs.project_id }}/
+          if-no-files-found: error
+
+      - name: Persist resumable runtime state
+        if: ${{ always() }}
+        run: |
+          git config user.name 'AIAppBuilder Agent'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add memory/runtime || true
+          if git diff --cached --quiet; then
+            echo 'No runtime-state changes to commit.'
+          else
+            git commit -m "Persist AIAppBuilder agent runtime state"
+            git push
+          fi
