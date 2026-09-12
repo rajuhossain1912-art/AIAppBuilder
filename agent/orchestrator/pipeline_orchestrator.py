@@ -181,6 +181,22 @@ class PipelineOrchestrator:
         artifact = Path(artifact_path).resolve()
         retries = 0
 
+        # Authorization is a hard precondition for generation/release work.  A
+        # caller may provide explicit authorization or rely on an approval that
+        # was already persisted in the Project Passport/state store.
+        approval_received = authorized or "requirements_and_plan" in self.orchestrator.state.received_approvals
+        if not approval_received:
+            self.orchestrator.record_error("User approval is required before BUILD, TEST, VERIFY, or DELIVERY.")
+            self.orchestrator.block_task("release_cycle")
+            if self.orchestrator.current_state not in {
+                LifecycleState.AWAITING_CONFIRMATION,
+                LifecycleState.FIXING,
+            }:
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+            raise PermissionError("Release cycle requires explicit user approval")
+        if authorized and "requirements_and_plan" not in self.orchestrator.state.received_approvals:
+            self.orchestrator.receive_approval("requirements_and_plan")
+
         self.orchestrator.set_task("review")
         review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
         while review.blocking:
@@ -293,7 +309,7 @@ class PipelineOrchestrator:
             build_passed=build.success,
             tests_passed=test.success,
             verification_passed=verification.final_status == "VERIFIED",
-            approval_received=authorized,
+            approval_received=approval_received,
         )
         if not quality.passed:
             self.orchestrator.record_error("Quality gate blocked delivery: " + "; ".join(quality.reasons))
@@ -310,7 +326,7 @@ class PipelineOrchestrator:
             accessibility_ok=accessibility_ok,
             compatibility_ok=compatibility_ok and completeness_ok,
             artifact_verified=verification.final_status == "VERIFIED",
-            authorized=authorized,
+            authorized=approval_received,
         )
         self.orchestrator.transition_to(LifecycleState.DELIVERING)
         self.orchestrator.set_task("delivery")
@@ -329,7 +345,7 @@ class PipelineOrchestrator:
                 "compatibility": compatibility_ok,
                 "completeness": completeness_ok,
                 "privacy": privacy_ok,
-                "authorized": authorized,
+                "authorized": approval_received,
                 "quality_gate": "PASSED",
             },
         )
