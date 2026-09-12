@@ -41,6 +41,26 @@ class OrchestratorTest(unittest.TestCase):
             self.assertIn("generate_android", restored.received_approvals)
             self.assertEqual(restored.last_successful_operation, "requirements_ready")
 
+    def test_verified_lifecycle_metadata_is_persisted_to_passport(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            orchestrator = Orchestrator("project-metadata", str(root / "state.json"))
+            orchestrator.start()
+            orchestrator.complete_task("build")
+            orchestrator.complete_task("test")
+            orchestrator.complete_task("verification")
+            orchestrator.record_verified_result("a" * 64)
+
+            passport = json.loads(
+                (root / "project_passport.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(passport["build_status"], "VERIFIED")
+            self.assertEqual(passport["test_status"], "VERIFIED")
+            self.assertEqual(passport["verification_status"], "VERIFIED")
+            self.assertEqual(passport["accessibility_status"], "VERIFIED")
+            self.assertEqual(passport["artifact_sha256"], "a" * 64)
+            self.assertEqual(passport["generated_revision"], "artifact:" + "a" * 64)
+
     def test_invalid_transition_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             orchestrator = Orchestrator("project-2", str(Path(temp_dir) / "state.json"))
