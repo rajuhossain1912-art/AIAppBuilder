@@ -51,6 +51,7 @@ jobs:
           )
           pipeline = AgentPipeline()
           intake = pipeline.intake(request)
+          assert not intake.clarifying_questions, intake.clarifying_questions
           generated = pipeline.generate_android(
               intake,
               Path('build/ci-android-app'),
