@@ -109,7 +109,7 @@ class VideoEditorGenerator:
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
             ByteBuffer buffer = ByteBuffer.allocateDirect(4 * 1024 * 1024);
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            while (true) {
+            for (int sampleIndex = 0; sampleIndex < 1000000; sampleIndex++) {
                 int size = extractor.readSampleData(buffer, 0);
                 if (size < 0) break;
                 long timeUs = extractor.getSampleTime();
@@ -137,7 +137,6 @@ class VideoEditorGenerator:
 """
         source = source.replace("    private android.net.Uri selectedVideoUri;", "    private android.net.Uri selectedVideoUri;")
         source = source.replace("}\n", methods + "}\n", 1)
-        # Preserve the original video picker callback and also capture the editor's picker.
         callback = "        if (requestCode == 7002 && resultCode == RESULT_OK) pickVideoResult(data);\n"
         source = source.replace("        super.onActivityResult(requestCode, resultCode, data);", "        super.onActivityResult(requestCode, resultCode, data);\n" + callback, 1)
         return VideoEditorGenerationResult(source=source, operations=self.OPERATIONS)
