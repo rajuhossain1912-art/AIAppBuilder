@@ -145,7 +145,9 @@ class OrchestratorStateManager:
     def mark_success(self, operation: str) -> None:
         if not isinstance(operation, str) or not operation.strip():
             raise ValueError("operation must not be empty")
-        self.state.last_successful_operation = operation.strip()
+        operation = operation.strip()
+        self.state.last_successful_operation = operation
+        self._add_unique_task(self.state.completed_tasks, operation)
 
     def mark_verified(self, result: str) -> None:
         if not isinstance(result, str) or not result.strip():
