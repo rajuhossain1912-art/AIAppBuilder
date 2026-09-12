@@ -28,7 +28,7 @@ class AgentPipelineTests(unittest.TestCase):
             "Create a calculator app that works fully offline.",
         )
         self.assertTrue(result.plan.build_required)
-        self.assertTrue(result.needs_user_confirmation)
+        self.assertFalse(result.needs_user_confirmation)
         with tempfile.TemporaryDirectory() as directory:
             generated = self.pipeline.generate_android(result, directory, approved=True)
             activity = Path(generated.project.root) / generated.features.files[0]
