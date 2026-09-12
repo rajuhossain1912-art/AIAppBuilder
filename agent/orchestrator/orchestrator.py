@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
+
+from agent.passport import ProjectPassport, ProjectPassportStore
 
 from .state_model import (
     LifecycleState,
@@ -26,6 +30,9 @@ class Orchestrator:
         self.project_id = project_id
         self.state_manager = OrchestratorStateManager(project_id)
         self.state_store = OrchestratorStateStore(state_path)
+        self.passport_store = ProjectPassportStore(
+            Path(state_path).with_name("project_passport.json")
+        )
 
     @property
     def state(self) -> OrchestratorState:
@@ -36,11 +43,7 @@ class Orchestrator:
         return self.state_manager.current_state
 
     def start(self) -> OrchestratorState:
-        """Start or restore the project lifecycle.
-
-        A missing state file starts a new project. A corrupted or invalid
-        state file is surfaced as an error rather than silently overwritten.
-        """
+        """Start or restore lifecycle state and its portable Project Passport."""
         try:
             restored_state = self.state_store.load()
         except StateStoreMissingError:
@@ -55,8 +58,13 @@ class Orchestrator:
                 raise OrchestratorError(
                     "Stored state belongs to a different project"
                 )
-
             self.state_manager.state = restored_state
+            try:
+                self._sync_passport()
+            except (OSError, ValueError) as exc:
+                raise OrchestratorError(
+                    "Unable to restore or update Project Passport"
+                ) from exc
             return restored_state
 
         self._persist()
@@ -120,10 +128,42 @@ class Orchestrator:
     def snapshot(self) -> dict:
         return self.state_manager.snapshot()
 
+    def _sync_passport(self) -> None:
+        try:
+            passport = self.passport_store.load()
+        except FileNotFoundError:
+            now = datetime.now(timezone.utc).isoformat()
+            passport = ProjectPassport(
+                project_id=self.project_id,
+                project_name=self.project_id,
+                created_at=now,
+            )
+
+        now = datetime.now(timezone.utc).isoformat()
+        passport.project_id = self.project_id
+        passport.project_name = passport.project_name or self.project_id
+        passport.updated_at = now
+        passport.current_state = self.state.current_state.value
+        passport.approved = "requirements_and_plan" in self.state.received_approvals
+        passport.completed_operations = list(self.state.completed_tasks)
+        passport.blocked_operations = list(self.state.blocked_tasks)
+        passport.known_errors = list(self.state.errors)
+        passport.recovery_notes = [
+            f"Lifecycle state persisted at {now}",
+            f"Retry count: {self.state.retry_count}",
+        ]
+        if self.state.last_verified_result:
+            passport.verification_status = "VERIFIED"
+            passport.artifact_sha256 = self.state.last_verified_result
+        if self.state.current_state == LifecycleState.COMPLETED:
+            passport.delivery_status = "READY"
+        self.passport_store.save(passport)
+
     def _persist(self) -> None:
         try:
             self.state_store.save(self.state_manager.state)
-        except StateStoreError as exc:
+            self._sync_passport()
+        except (StateStoreError, OSError, ValueError) as exc:
             raise OrchestratorError(
-                "Unable to persist orchestrator state"
+                "Unable to persist orchestrator state or Project Passport"
             ) from exc
