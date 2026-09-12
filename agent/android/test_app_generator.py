@@ -20,22 +20,24 @@ class AndroidAppGeneratorTests(unittest.TestCase):
         requirements = self.requirements.analyze(request)
         return self.planning.create_plan(requirements)
 
-    def test_requires_explicit_approval(self):
+    def test_requires_explicit_approval(self) -> None:
         plan = self._plan("Create a calculator app that works fully offline.")
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(AndroidAppGenerationError):
                 self.generator.generate(plan, directory)
 
-    def test_generates_project_and_features_after_approval(self):
+    def test_generates_project_and_features_after_approval(self) -> None:
         plan = self._plan("Create an accessible calculator app that works fully offline.")
         with tempfile.TemporaryDirectory() as directory:
             result = self.generator.generate(plan, directory, approved=True)
-            activity = Path(directory) / "app/src/main/java/com/aiappbuilder/createanaccessiblecalculatorapp/MainActivity.java"
+            package_path = "/".join(result.intent.spec.package_name.split("."))
+            activity = Path(directory) / "app" / "src" / "main" / "java" / package_path / "MainActivity.java"
             self.assertTrue(activity.is_file())
             self.assertEqual(result.intent.family, "utility")
             self.assertEqual(result.features.family, "utility")
-            self.assertIn("Double.parseDouble", activity.read_text(encoding="utf-8"))
-            self.assertIn("setContentDescription", activity.read_text(encoding="utf-8"))
+            source = activity.read_text(encoding="utf-8")
+            self.assertIn("Double.parseDouble", source)
+            self.assertIn("setContentDescription", source)
 
 
 if __name__ == "__main__":
