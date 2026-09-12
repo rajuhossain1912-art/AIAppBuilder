@@ -39,6 +39,11 @@ class AndroidAppGeneratorTests(unittest.TestCase):
             self.assertIn("Double.parseDouble", source)
             self.assertIn("setContentDescription", source)
 
+    def test_rejects_generation_with_invalid_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(TypeError):
+                self.generator.generate(None, directory, approved=True)  # type: ignore[arg-type]
+
 
 if __name__ == "__main__":
     unittest.main()
