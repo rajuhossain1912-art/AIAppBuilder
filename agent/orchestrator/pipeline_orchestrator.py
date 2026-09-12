@@ -9,7 +9,13 @@ from agent.delivery import DeliveryEngine, DeliveryGate, DeliveryResult
 from agent.pipeline import AgentPipeline, IntakeResult
 from agent.review import ReviewEngine, ReviewReport
 from agent.test import TestEngine, TestResult
-from agent.verification import VerificationExecutor, VerificationReport
+from agent.verification import (
+    AndroidAccessibilityVerifier,
+    AndroidCompletenessVerifier,
+    AndroidCompatibilityVerifier,
+    VerificationExecutor,
+    VerificationReport,
+)
 
 from .orchestrator import Orchestrator
 from .state_model import LifecycleState
@@ -45,6 +51,9 @@ class PipelineOrchestrator:
         self.build_engine = BuildEngine()
         self.test_engine = TestEngine()
         self.verification_executor = VerificationExecutor()
+        self.accessibility_verifier = AndroidAccessibilityVerifier()
+        self.completeness_verifier = AndroidCompletenessVerifier()
+        self.compatibility_verifier = AndroidCompatibilityVerifier()
         self.delivery_engine = DeliveryEngine()
 
     def intake(self, user_request: str) -> OrchestratedIntake:
@@ -60,14 +69,9 @@ class PipelineOrchestrator:
         else:
             self.orchestrator.transition_to(LifecycleState.PLANNING)
             self.orchestrator.record_success("requirements_and_plan_ready")
-
         return OrchestratedIntake(intake=result, orchestrator=self.orchestrator)
 
-    def approve_and_generate(
-        self,
-        result: OrchestratedIntake,
-        output_root: str | Path,
-    ):
+    def approve_and_generate(self, result: OrchestratedIntake, output_root: str | Path):
         if result.orchestrator is not self.orchestrator:
             raise ValueError("result belongs to a different orchestrator")
         if result.intake.needs_user_confirmation:
@@ -77,20 +81,24 @@ class PipelineOrchestrator:
         self.orchestrator.transition_to(LifecycleState.GENERATING)
         self.orchestrator.set_task("android_generation")
         try:
-            generated = self.pipeline.generate_android(
-                result.intake,
-                output_root,
-                approved=True,
-            )
+            generated = self.pipeline.generate_android(result.intake, output_root, approved=True)
         except Exception as exc:
             self.orchestrator.record_error(str(exc))
             self.orchestrator.transition_to(LifecycleState.FIXING)
             raise
-
         self.orchestrator.complete_task("android_generation")
         self.orchestrator.record_success("android_source_generated")
         self.orchestrator.transition_to(LifecycleState.REVIEWING)
         return generated
+
+    @staticmethod
+    def _android_source_path(root: Path, review_paths: Sequence[str]) -> Path | None:
+        candidates = [root / p for p in review_paths if p.endswith((".java", ".kt", ".xml"))]
+        for candidate in candidates:
+            if candidate.suffix == ".java" and candidate.is_file():
+                return candidate
+        java_files = sorted((root / "app").rglob("*.java")) if (root / "app").is_dir() else []
+        return java_files[0] if java_files else None
 
     def execute_release_cycle(
         self,
@@ -105,8 +113,9 @@ class PipelineOrchestrator:
     ) -> ReleaseCycleResult:
         """Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY.
 
-        Every transition is recorded. A failed stage can only retry through FIXING,
-        and delivery is impossible unless every DeliveryGate requirement is satisfied.
+        Verification failures now re-enter the complete build/test/verify cycle instead
+        of escaping to the caller. Accessibility, completeness and compatibility are
+        evidence-backed gates rather than hard-coded delivery flags.
         """
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be between 0 and 5")
@@ -116,88 +125,132 @@ class PipelineOrchestrator:
 
         self.orchestrator.set_task("review")
         review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
-        if review.blocking:
-            while review.blocking and retries < max_retries:
-                retries += 1
-                self.orchestrator.record_error("Release-blocking review findings require fixing.")
-                self.orchestrator.increment_retry()
+        while review.blocking:
+            if retries >= max_retries:
+                self.orchestrator.record_error("Release blocked by unresolved review findings.")
                 self.orchestrator.transition_to(LifecycleState.FIXING)
-                if fix_callback:
-                    fix_callback("REVIEW", retries)
-                self.orchestrator.transition_to(LifecycleState.REVIEWING)
-                review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
-            if review.blocking:
                 raise RuntimeError("Release blocked by unresolved review findings")
+            retries += 1
+            self.orchestrator.record_error("Release-blocking review findings require fixing.")
+            self.orchestrator.increment_retry()
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            if fix_callback:
+                fix_callback("REVIEW", retries)
+            self.orchestrator.transition_to(LifecycleState.REVIEWING)
+            review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
         self.orchestrator.complete_task("review")
         self.orchestrator.record_success("review_passed")
+
+        build: BuildResult
+        test: TestResult
+        verification: VerificationReport
+        accessibility_ok = False
+        compatibility_ok = False
+        completeness_ok = False
+        source_path = self._android_source_path(root, review_paths)
 
         while True:
             self.orchestrator.transition_to(LifecycleState.BUILDING)
             self.orchestrator.set_task("build")
             build = self.build_engine.run(root, build_command)
-            if build.success:
-                self.orchestrator.complete_task("build")
-                self.orchestrator.record_success("build_succeeded")
-                break
-            if retries >= max_retries:
+            if not build.success:
+                if retries >= max_retries:
+                    self.orchestrator.record_error(build.stderr or "Build failed")
+                    self.orchestrator.transition_to(LifecycleState.FIXING)
+                    raise RuntimeError("Build failed and retry limit was reached")
+                retries += 1
+                self.orchestrator.increment_retry()
                 self.orchestrator.record_error(build.stderr or "Build failed")
                 self.orchestrator.transition_to(LifecycleState.FIXING)
-                raise RuntimeError("Build failed and retry limit was reached")
-            retries += 1
-            self.orchestrator.increment_retry()
-            self.orchestrator.record_error(build.stderr or "Build failed")
-            self.orchestrator.transition_to(LifecycleState.FIXING)
-            if fix_callback:
-                fix_callback("BUILD", retries)
+                if fix_callback:
+                    fix_callback("BUILD", retries)
+                continue
+            self.orchestrator.complete_task("build")
+            self.orchestrator.record_success("build_succeeded")
 
-        while True:
             self.orchestrator.transition_to(LifecycleState.TESTING)
             self.orchestrator.set_task("test")
             test = self.test_engine.run(root, test_command)
-            if test.success:
-                self.orchestrator.complete_task("test")
-                self.orchestrator.record_success("tests_passed")
-                break
-            if retries >= max_retries:
-                self.orchestrator.record_error(test.stderr or "Tests failed")
-                self.orchestrator.transition_to(LifecycleState.FIXING)
-                raise RuntimeError("Tests failed and retry limit was reached")
-            retries += 1
-            self.orchestrator.increment_retry()
-            self.orchestrator.record_error(test.stderr or "Tests failed")
-            self.orchestrator.transition_to(LifecycleState.FIXING)
-            if fix_callback:
-                fix_callback("TEST", retries)
-
-        self.orchestrator.transition_to(LifecycleState.VERIFYING)
-        self.orchestrator.set_task("verification")
-        verification = self.verification_executor.hash_artifact(self.orchestrator.state.project_id, artifact)
-        if verification.final_status != "VERIFIED":
-            if retries < max_retries:
+            if not test.success:
+                if retries >= max_retries:
+                    self.orchestrator.record_error(test.stderr or "Tests failed")
+                    self.orchestrator.transition_to(LifecycleState.FIXING)
+                    raise RuntimeError("Tests failed and retry limit was reached")
                 retries += 1
                 self.orchestrator.increment_retry()
+                self.orchestrator.record_error(test.stderr or "Tests failed")
                 self.orchestrator.transition_to(LifecycleState.FIXING)
                 if fix_callback:
-                    fix_callback("VERIFY", retries)
-                raise RuntimeError("Artifact verification failed; retry requires a new release cycle")
-            raise RuntimeError("Artifact verification failed")
-        self.orchestrator.complete_task("verification")
-        self.orchestrator.mark_verified("artifact_sha256")
+                    fix_callback("TEST", retries)
+                continue
+            self.orchestrator.complete_task("test")
+            self.orchestrator.record_success("tests_passed")
+
+            self.orchestrator.transition_to(LifecycleState.VERIFYING)
+            self.orchestrator.set_task("verification")
+            verification = self.verification_executor.hash_artifact(self.orchestrator.state.project_id, artifact)
+            accessibility_ok = False
+            compatibility_ok = False
+            completeness_ok = False
+            if source_path is not None and source_path.suffix == ".java":
+                accessibility_ok = self.accessibility_verifier.verify_source(
+                    self.orchestrator.state.project_id, source_path
+                ).final_status == "VERIFIED"
+            compatibility_ok = self.compatibility_verifier.verify_project(
+                self.orchestrator.state.project_id, root
+            ).final_status == "VERIFIED"
+            completeness_ok = self.completeness_verifier.verify_project(
+                self.orchestrator.state.project_id, root
+            ).status == "VERIFIED"
+
+            verification_ok = verification.final_status == "VERIFIED" and accessibility_ok and compatibility_ok and completeness_ok
+            if verification_ok:
+                self.orchestrator.complete_task("verification")
+                self.orchestrator.mark_verified("artifact_sha256")
+                break
+
+            if retries >= max_retries:
+                self.orchestrator.record_error("Verification gates failed and retry limit was reached.")
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+                raise RuntimeError("Verification failed and retry limit was reached")
+            retries += 1
+            self.orchestrator.increment_retry()
+            self.orchestrator.record_error("Verification gates failed; release requires another fix/retry cycle.")
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            if fix_callback:
+                fix_callback("VERIFY", retries)
 
         gate = DeliveryGate(
             requirements_verified=True,
             build_succeeded=build.success,
             tests_passed=test.success,
             review_blockers_resolved=not review.blocking,
-            security_ok=not any(f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"} for f in review.findings),
-            accessibility_ok=True,
-            compatibility_ok=True,
-            artifact_verified=True,
+            security_ok=not any(
+                f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"}
+                for f in review.findings
+            ),
+            accessibility_ok=accessibility_ok,
+            compatibility_ok=compatibility_ok and completeness_ok,
+            artifact_verified=verification.final_status == "VERIFIED",
             authorized=authorized,
         )
         self.orchestrator.transition_to(LifecycleState.DELIVERING)
         self.orchestrator.set_task("delivery")
-        delivery = self.delivery_engine.prepare(gate, artifact)
+        delivery = self.delivery_engine.prepare(
+            gate,
+            artifact,
+            project_id=self.orchestrator.state.project_id,
+            evidence={
+                "review": "PASSED",
+                "build": "PASSED",
+                "tests": "PASSED",
+                "artifact_verification": verification.final_status,
+                "accessibility": accessibility_ok,
+                "compatibility": compatibility_ok,
+                "completeness": completeness_ok,
+                "authorized": authorized,
+            },
+        )
         if delivery.status != "READY":
             self.orchestrator.record_error("Delivery gate blocked release.")
             self.orchestrator.transition_to(LifecycleState.FIXING)
