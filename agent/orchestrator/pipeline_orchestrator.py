@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import json
+import os
 from typing import Callable, Sequence
 
 from agent.build import BuildEngine, BuildResult
 from agent.delivery import DeliveryEngine, DeliveryGate, DeliveryResult
 from agent.pipeline import AgentPipeline, IntakeResult
+from agent.quality import QualityGate
+from agent.recovery import RecoveryManifestBuilder
 from agent.review import ReviewEngine, ReviewReport
 from agent.security import PrivacyGuard
 from agent.test import TestEngine, TestResult
@@ -57,6 +61,8 @@ class PipelineOrchestrator:
         self.completeness_verifier = AndroidCompletenessVerifier()
         self.compatibility_verifier = AndroidCompatibilityVerifier()
         self.privacy_guard = PrivacyGuard()
+        self.quality_gate = QualityGate()
+        self.recovery_manifest_builder = RecoveryManifestBuilder()
         self.delivery_engine = DeliveryEngine()
 
     def intake(self, user_request: str) -> OrchestratedIntake:
@@ -117,6 +123,45 @@ class PipelineOrchestrator:
             and not evidence.get("missing_files")
             and not evidence.get("unresolved_questions")
         )
+
+    @staticmethod
+    def _artifact_sha256(verification: VerificationReport) -> str:
+        for evidence in verification.evidence:
+            if evidence.check == "ARTIFACT_HASH" and evidence.status == "VERIFIED":
+                prefix = "SHA-256: "
+                if evidence.detail.startswith(prefix):
+                    return evidence.detail[len(prefix):].strip()
+        return ""
+
+    def _write_recovery_manifest(
+        self,
+        root: Path,
+        artifact: Path,
+        delivery: DeliveryResult,
+        artifact_sha256: str,
+    ) -> Path:
+        passport_path = self.orchestrator.passport_store.path
+        passport_sha256 = hashlib.sha256(passport_path.read_bytes()).hexdigest() if passport_path.is_file() else "unavailable"
+        source_revision = os.environ.get("GITHUB_SHA", "local-workspace")
+        generated_revision = f"artifact:{artifact_sha256}"
+        build_provider = "GitHub Actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
+        build_reference = os.environ.get("GITHUB_RUN_ID", delivery.manifest or str(artifact))
+        manifest = self.recovery_manifest_builder.build(
+            project_id=self.orchestrator.state.project_id,
+            source_revision=source_revision,
+            passport_revision=passport_sha256,
+            generated_revision=generated_revision,
+            build_provider=build_provider,
+            build_reference=str(build_reference),
+            artifact_sha256=artifact_sha256,
+            restore_instructions=(
+                "Restore the repository at source_revision, restore project_passport.json, "
+                "recreate the generated project, and verify the delivered artifact against artifact_sha256."
+            ),
+        )
+        manifest_path = root / "recovery_manifest.json"
+        manifest_path.write_text(manifest.to_json() + "\n", encoding="utf-8")
+        return manifest_path
 
     def execute_release_cycle(
         self,
@@ -225,7 +270,12 @@ class PipelineOrchestrator:
                 and requirements_ok
             ):
                 self.orchestrator.complete_task("verification")
-                self.orchestrator.record_verified_result("artifact_sha256")
+                artifact_sha256 = self._artifact_sha256(verification)
+                if not artifact_sha256:
+                    self.orchestrator.record_error("Verification passed without an artifact SHA-256 evidence value.")
+                    self.orchestrator.transition_to(LifecycleState.FIXING)
+                    raise RuntimeError("Verification produced no artifact SHA-256")
+                self.orchestrator.record_verified_result(artifact_sha256)
                 break
 
             if retries >= max_retries:
@@ -238,6 +288,17 @@ class PipelineOrchestrator:
             self.orchestrator.transition_to(LifecycleState.FIXING)
             if fix_callback:
                 fix_callback("VERIFY", retries)
+
+        quality = self.quality_gate.evaluate(
+            build_passed=build.success,
+            tests_passed=test.success,
+            verification_passed=verification.final_status == "VERIFIED",
+            approval_received=authorized,
+        )
+        if not quality.passed:
+            self.orchestrator.record_error("Quality gate blocked delivery: " + "; ".join(quality.reasons))
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            raise RuntimeError("Quality gate blocked delivery: " + "; ".join(quality.reasons))
 
         gate = DeliveryGate(
             requirements_verified=requirements_ok,
@@ -263,17 +324,20 @@ class PipelineOrchestrator:
                 "tests": "PASSED",
                 "requirements": requirements_ok,
                 "artifact_verification": verification.final_status,
+                "artifact_sha256": artifact_sha256,
                 "accessibility": accessibility_ok,
                 "compatibility": compatibility_ok,
                 "completeness": completeness_ok,
                 "privacy": privacy_ok,
                 "authorized": authorized,
+                "quality_gate": "PASSED",
             },
         )
         if delivery.status != "READY":
             self.orchestrator.record_error("Delivery gate blocked release.")
             self.orchestrator.transition_to(LifecycleState.FIXING)
             raise RuntimeError("Delivery blocked: " + "; ".join(delivery.reasons))
+        self._write_recovery_manifest(root, artifact, delivery, artifact_sha256)
         self.orchestrator.complete_task("delivery")
         self.orchestrator.record_success("delivery_ready")
         self.orchestrator.transition_to(LifecycleState.COMPLETED)
