@@ -29,6 +29,7 @@ class AndroidFeatureGeneratorTests(unittest.TestCase):
             result = self.generator.generate(tmp, intent)
             source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
         self.assertEqual(result.family, "utility")
+        self.assertIn("calculator", result.capabilities)
         self.assertIn("Double.parseDouble", source)
         self.assertIn("Result:", source)
         self.assertIn("setContentDescription", source)
@@ -40,8 +41,29 @@ class AndroidFeatureGeneratorTests(unittest.TestCase):
             result = self.generator.generate(tmp, intent)
             source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
         self.assertEqual(result.family, "form")
+        self.assertIn("forms_data", result.capabilities)
         self.assertIn("Name is required", source)
         self.assertIn("Saved:", source)
+
+    def test_voice_video_news_request_is_composed(self):
+        request = (
+            "Create an accessible Bangla AI voice video maker with text to speech, "
+            "images, video creation and an online news content screen."
+        )
+        intent = self._intent(request)
+        expected = {"audio", "video", "image", "news", "text_content", "online_service"}
+        self.assertTrue(expected.issubset(set(intent.capabilities)))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.project_generator.generate(tmp, intent.spec)
+            result = self.generator.generate(tmp, intent)
+            source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
+        self.assertTrue(expected.issubset(set(result.capabilities)))
+        self.assertIn("TextToSpeech", source)
+        self.assertIn("Video capability", source)
+        self.assertIn("Image capability", source)
+        self.assertIn("News and newspaper capability", source)
+        self.assertIn("Text and content capability", source)
+        self.assertIn("Online service capability", source)
 
     def test_requires_existing_generated_project(self):
         intent = self._intent("Create a calculator app.")
