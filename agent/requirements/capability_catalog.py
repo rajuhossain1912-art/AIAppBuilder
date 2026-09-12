@@ -29,6 +29,9 @@ _CAPABILITIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("calendar", "Calendar", ("calendar", "english calendar", "bengali calendar", "bangla calendar", "date", "holiday")),
     ("forms_data", "Forms, records and catalogs", ("form", "forms", "database", "record", "catalog", "directory", "registration", "search")),
     ("online_service", "Online services and API content", ("online", "api", "website", "web service", "server", "cloud", "live data")),
+    ("music", "Music and composition", ("music", "musical", "song", "melody", "rhythm", "beat", "chord", "note", "সঙ্গীত", "গান", "সুর", "তাল")),
+    ("instrument", "Virtual musical instruments", ("instrument", "guitar", "harmonium", "tabla", "flute", "piano", "violin", "drum", "percussion", "বাদ্যযন্ত্র", "গিটার", "হারমোনিয়াম", "তবলা", "বাঁশি", "পিয়ানো")),
+    ("typing_keyboard", "Typing and input keyboard", ("typing keyboard", "input keyboard", "onscreen keyboard", "software keyboard", "bangla keyboard", "english keyboard", "টাইপিং কিবোর্ড", "লেখার কিবোর্ড", "বাংলা কিবোর্ড")),
 )
 
 
@@ -37,7 +40,7 @@ def classify_capabilities(request: str) -> list[CapabilityMatch]:
     lowered = request.casefold()
     matches: list[CapabilityMatch] = []
     for key, label, hints in _CAPABILITIES:
-        evidence = tuple(hint for hint in hints if hint in lowered)
+        evidence = tuple(hint for hint in hints if hint.casefold() in lowered)
         if evidence:
             matches.append(CapabilityMatch(key=key, label=label, evidence=evidence))
     if not matches:
