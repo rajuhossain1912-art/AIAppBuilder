@@ -11,10 +11,20 @@ class ComposedAndroidScreen:
 
     source: str
     capabilities: tuple[str, ...]
+    implemented_capabilities: tuple[str, ...] = ()
+    unsupported_capabilities: tuple[str, ...] = ()
 
 
 class AndroidCapabilityComposer:
-    """Compose a deterministic Android activity from a capability set."""
+    """Compose a deterministic Android activity from a capability set.
+
+    A capability is marked implemented only when this generator emits a real
+    local implementation for it. Descriptive labels are never treated as a
+    completed feature, which prevents unsupported APIs from being presented
+    to a client as working functionality.
+    """
+
+    IMPLEMENTED_CAPABILITIES = frozenset({"calculator", "audio", "forms_data", "calendar", "general"})
 
     def compose(self, intent: AndroidBuildIntent) -> ComposedAndroidScreen:
         capabilities = tuple(intent.capabilities) or ("general",)
@@ -41,6 +51,9 @@ class AndroidCapabilityComposer:
         has_audio = "audio" in capabilities
         if has_audio:
             imports.add("import android.speech.tts.TextToSpeech;")
+
+        implemented = tuple(capability for capability in capabilities if capability in self.IMPLEMENTED_CAPABILITIES)
+        unsupported = tuple(capability for capability in capabilities if capability not in self.IMPLEMENTED_CAPABILITIES)
 
         package = intent.spec.package_name
         title = _java(intent.spec.project_name)
@@ -104,7 +117,12 @@ class AndroidCapabilityComposer:
 """
         source += "\n".join(methods)
         source += "\n}\n"
-        return ComposedAndroidScreen(source=source, capabilities=capabilities)
+        return ComposedAndroidScreen(
+            source=source,
+            capabilities=capabilities,
+            implemented_capabilities=implemented,
+            unsupported_capabilities=unsupported,
+        )
 
     @staticmethod
     def _section(capability: str) -> tuple[str, set[str], list[str], list[str]]:
@@ -141,12 +159,15 @@ class AndroidCapabilityComposer:
             "forms_data": "Forms and data capability",
             "online_service": "Online service capability",
             "calendar": "Calendar capability",
+            "music": "Music and composition capability",
+            "instrument": "Virtual musical instrument capability",
+            "typing_keyboard": "Typing keyboard capability",
             "general": "General application capability",
         }
         if capability not in labels:
             capability = "general"
         variable = capability.replace("-", "_")
-        block = f'''TextView {variable} = label("{labels[capability]} is included in this composed app.");
+        block = f'''TextView {variable} = label("{labels[capability]} is requested; implementation must be verified before delivery.");
         root.addView({variable});'''
 
         if capability == "audio":
