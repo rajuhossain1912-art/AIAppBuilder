@@ -44,6 +44,8 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     if: ${{ github.event.repository.private == true }}
+    env:
+      AIAPPBUILDER_ALLOW_PERSISTENT_CLIENT_DATA: 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
