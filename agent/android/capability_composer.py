@@ -22,7 +22,6 @@ class AndroidCapabilityComposer:
         imports = {
             "import android.app.Activity;",
             "import android.os.Bundle;",
-            "import android.speech.tts.TextToSpeech;",
             "import android.view.ViewGroup;",
             "import android.widget.Button;",
             "import android.widget.EditText;",
@@ -39,6 +38,10 @@ class AndroidCapabilityComposer:
             state.extend(extra_state)
             methods.extend(extra_methods)
 
+        has_audio = "audio" in capabilities
+        if has_audio:
+            imports.add("import android.speech.tts.TextToSpeech;")
+
         package = intent.spec.package_name
         title = _java(intent.spec.project_name)
         source = f"package {package};\n\n" + "\n".join(sorted(imports)) + "\n\n"
@@ -50,17 +53,19 @@ class AndroidCapabilityComposer:
         source += "\n    @Override\n    protected void onCreate(Bundle savedInstanceState) {\n"
         source += "        super.onCreate(savedInstanceState);\n"
         source += f'        root = base("{title}");\n        status = label("Ready");\n        root.addView(status);\n'
-        if "audio" in capabilities:
+        if has_audio:
             source += '        tts = new TextToSpeech(this, result -> { if (result == TextToSpeech.SUCCESS) tts.setLanguage(java.util.Locale.getDefault()); });\n'
         source += "\n".join(f"        {line}" for line in sections) + "\n"
         source += "        setContentView(root);\n    }\n\n"
-        source += """    @Override
+        if has_audio:
+            source += """    @Override
     protected void onDestroy() {
         if (tts != null) tts.shutdown();
         super.onDestroy();
     }
 
-    private LinearLayout base(String title) {
+"""
+        source += """    private LinearLayout base(String title) {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
         view.setPadding(32, 32, 32, 32);
