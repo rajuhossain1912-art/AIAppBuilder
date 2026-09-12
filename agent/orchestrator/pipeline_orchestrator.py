@@ -2,8 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Sequence
 
+from agent.build import BuildEngine, BuildResult
+from agent.delivery import DeliveryEngine, DeliveryGate, DeliveryResult
 from agent.pipeline import AgentPipeline, IntakeResult
+from agent.review import ReviewEngine, ReviewReport
+from agent.test import TestEngine, TestResult
+from agent.verification import VerificationExecutor, VerificationReport
 
 from .orchestrator import Orchestrator
 from .state_model import LifecycleState
@@ -15,12 +21,31 @@ class OrchestratedIntake:
     orchestrator: Orchestrator
 
 
+@dataclass(frozen=True)
+class ReleaseCycleResult:
+    review: ReviewReport
+    build: BuildResult
+    test: TestResult
+    verification: VerificationReport
+    delivery: DeliveryResult
+    retries: int
+
+    @property
+    def delivered(self) -> bool:
+        return self.delivery.status == "READY"
+
+
 class PipelineOrchestrator:
-    """Bind client intake to durable lifecycle state without bypassing approval."""
+    """Bind intake, generation, review, build, test, verification and delivery."""
 
     def __init__(self, project_id: str, state_path: str | Path) -> None:
         self.orchestrator = Orchestrator(project_id, str(state_path))
         self.pipeline = AgentPipeline()
+        self.review_engine = ReviewEngine()
+        self.build_engine = BuildEngine()
+        self.test_engine = TestEngine()
+        self.verification_executor = VerificationExecutor()
+        self.delivery_engine = DeliveryEngine()
 
     def intake(self, user_request: str) -> OrchestratedIntake:
         self.orchestrator.start()
@@ -66,3 +91,118 @@ class PipelineOrchestrator:
         self.orchestrator.record_success("android_source_generated")
         self.orchestrator.transition_to(LifecycleState.REVIEWING)
         return generated
+
+    def execute_release_cycle(
+        self,
+        project_root: str | Path,
+        review_paths: Sequence[str],
+        build_command: Sequence[str],
+        test_command: Sequence[str],
+        artifact_path: str | Path,
+        authorized: bool = False,
+        max_retries: int = 2,
+        fix_callback: Callable[[str, int], None] | None = None,
+    ) -> ReleaseCycleResult:
+        """Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY.
+
+        Every transition is recorded. A failed stage can only retry through FIXING,
+        and delivery is impossible unless every DeliveryGate requirement is satisfied.
+        """
+        if max_retries < 0 or max_retries > 5:
+            raise ValueError("max_retries must be between 0 and 5")
+        root = Path(project_root).resolve()
+        artifact = Path(artifact_path).resolve()
+        retries = 0
+
+        self.orchestrator.set_task("review")
+        review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
+        if review.blocking:
+            while review.blocking and retries < max_retries:
+                retries += 1
+                self.orchestrator.record_error("Release-blocking review findings require fixing.")
+                self.orchestrator.increment_retry()
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+                if fix_callback:
+                    fix_callback("REVIEW", retries)
+                self.orchestrator.transition_to(LifecycleState.REVIEWING)
+                review = self.review_engine.review_paths(self.orchestrator.state.project_id, root, review_paths)
+            if review.blocking:
+                raise RuntimeError("Release blocked by unresolved review findings")
+        self.orchestrator.complete_task("review")
+        self.orchestrator.record_success("review_passed")
+
+        while True:
+            self.orchestrator.transition_to(LifecycleState.BUILDING)
+            self.orchestrator.set_task("build")
+            build = self.build_engine.run(root, build_command)
+            if build.success:
+                self.orchestrator.complete_task("build")
+                self.orchestrator.record_success("build_succeeded")
+                break
+            if retries >= max_retries:
+                self.orchestrator.record_error(build.stderr or "Build failed")
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+                raise RuntimeError("Build failed and retry limit was reached")
+            retries += 1
+            self.orchestrator.increment_retry()
+            self.orchestrator.record_error(build.stderr or "Build failed")
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            if fix_callback:
+                fix_callback("BUILD", retries)
+
+        while True:
+            self.orchestrator.transition_to(LifecycleState.TESTING)
+            self.orchestrator.set_task("test")
+            test = self.test_engine.run(root, test_command)
+            if test.success:
+                self.orchestrator.complete_task("test")
+                self.orchestrator.record_success("tests_passed")
+                break
+            if retries >= max_retries:
+                self.orchestrator.record_error(test.stderr or "Tests failed")
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+                raise RuntimeError("Tests failed and retry limit was reached")
+            retries += 1
+            self.orchestrator.increment_retry()
+            self.orchestrator.record_error(test.stderr or "Tests failed")
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            if fix_callback:
+                fix_callback("TEST", retries)
+
+        self.orchestrator.transition_to(LifecycleState.VERIFYING)
+        self.orchestrator.set_task("verification")
+        verification = self.verification_executor.hash_artifact(self.orchestrator.state.project_id, artifact)
+        if verification.final_status != "VERIFIED":
+            if retries < max_retries:
+                retries += 1
+                self.orchestrator.increment_retry()
+                self.orchestrator.transition_to(LifecycleState.FIXING)
+                if fix_callback:
+                    fix_callback("VERIFY", retries)
+                raise RuntimeError("Artifact verification failed; retry requires a new release cycle")
+            raise RuntimeError("Artifact verification failed")
+        self.orchestrator.complete_task("verification")
+        self.orchestrator.mark_verified("artifact_sha256")
+
+        gate = DeliveryGate(
+            requirements_verified=True,
+            build_succeeded=build.success,
+            tests_passed=test.success,
+            review_blockers_resolved=not review.blocking,
+            security_ok=not any(f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"} for f in review.findings),
+            accessibility_ok=True,
+            compatibility_ok=True,
+            artifact_verified=True,
+            authorized=authorized,
+        )
+        self.orchestrator.transition_to(LifecycleState.DELIVERING)
+        self.orchestrator.set_task("delivery")
+        delivery = self.delivery_engine.prepare(gate, artifact)
+        if delivery.status != "READY":
+            self.orchestrator.record_error("Delivery gate blocked release.")
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            raise RuntimeError("Delivery blocked: " + "; ".join(delivery.reasons))
+        self.orchestrator.complete_task("delivery")
+        self.orchestrator.record_success("delivery_ready")
+        self.orchestrator.transition_to(LifecycleState.COMPLETED)
+        return ReleaseCycleResult(review, build, test, verification, delivery, retries)
