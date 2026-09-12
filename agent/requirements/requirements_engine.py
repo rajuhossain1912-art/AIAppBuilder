@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .capability_catalog import CapabilityMatch, classify_capabilities
+
 
 @dataclass
 class RequirementSet:
@@ -17,6 +19,7 @@ class RequirementSet:
     compatibility: list[str] = field(default_factory=list)
     unresolved_questions: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    capabilities: list[CapabilityMatch] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not isinstance(self.original_request, str) or not self.original_request.strip():
@@ -27,20 +30,15 @@ class RequirementSet:
 
 
 class RequirementEngine:
-    """Safe first-pass requirement intake.
+    """First-pass requirement intake for a general-purpose app builder.
 
-    This component deliberately does not pretend to understand unstated
-    requirements. It preserves the user's wording and only extracts
-    high-confidence structural hints from it.
+    Capability classification is compositional: an app can combine news,
+    audio, video, business, education and other capabilities. It is not a
+    fixed template registry, and unmatched ideas are preserved as general.
     """
 
     ACCESSIBILITY_HINTS = (
-        "talkback",
-        "accessibility",
-        "accessible",
-        "screen reader",
-        "blind",
-        "visually impaired",
+        "talkback", "accessibility", "accessible", "screen reader", "blind", "visually impaired"
     )
     OFFLINE_HINTS = ("offline", "without internet", "no internet")
     ONLINE_HINTS = ("online", "internet", "api", "server", "cloud")
@@ -50,17 +48,15 @@ class RequirementEngine:
         text = request.strip()
         lowered = text.casefold()
         result.normalized_request = " ".join(text.split())
+        result.capabilities = classify_capabilities(text)
 
         if any(hint in lowered for hint in self.ACCESSIBILITY_HINTS):
             result.accessibility.append("Support accessible interaction and screen-reader workflows.")
-
         if any(hint in lowered for hint in self.OFFLINE_HINTS):
             result.compatibility.append("Offline operation is required for at least part of the application.")
-
         if any(hint in lowered for hint in self.ONLINE_HINTS):
             result.compatibility.append("Online/network functionality is required for at least part of the application.")
 
-        if not result.functional:
-            result.functional.append("Implement the functionality explicitly requested by the user.")
-
+        labels = ", ".join(match.label for match in result.capabilities)
+        result.functional.append(f"Compose the requested app from detected capabilities: {labels}.")
         return result
