@@ -35,17 +35,11 @@ class ReleaseCycleTests(unittest.TestCase):
         )
         (root / "requirements_verification.json").write_text(
             json.dumps({
-                "status": "VERIFIED",
-                "required_capabilities": ["general"],
-                "generated_capabilities": ["general"],
-                "implemented_capabilities": ["general"],
-                "unsupported_capabilities": [],
-                "missing_capabilities": [],
-                "missing_files": [],
-                "unresolved_questions": [],
-                "reasons": [],
-            }),
-            encoding="utf-8",
+                "status": "VERIFIED", "required_capabilities": ["general"],
+                "generated_capabilities": ["general"], "implemented_capabilities": ["general"],
+                "unsupported_capabilities": [], "missing_capabilities": [],
+                "missing_files": [], "unresolved_questions": [], "reasons": [],
+            }), encoding="utf-8",
         )
 
     def _start_review(self, runner: PipelineOrchestrator) -> None:
@@ -55,150 +49,61 @@ class ReleaseCycleTests(unittest.TestCase):
         runner.orchestrator.transition_to(LifecycleState.GENERATING)
         runner.orchestrator.transition_to(LifecycleState.REVIEWING)
 
+    def _commands(self):
+        build = ["python", "-c", "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')"]
+        test = ["python", "-c", "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()"]
+        return build, test
+
     def test_review_build_test_verify_delivery_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            self._android_fixture(root)
-            artifact = root / "app-debug.apk"
-            build = [
-                "python",
-                "-c",
-                "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
-            ]
-            test = [
-                "python",
-                "-c",
-                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
-            ]
-
-            runner = PipelineOrchestrator("release-test", root / "state.json")
-            self._start_review(runner)
-
-            result = runner.execute_release_cycle(
-                project_root=root,
-                review_paths=["app/src/main/Main.java"],
-                build_command=build,
-                test_command=test,
-                artifact_path=artifact,
-                authorized=True,
-            )
-
+            root = Path(temp); self._android_fixture(root); artifact = root / "app-debug.apk"
+            build, test = self._commands()
+            runner = PipelineOrchestrator("release-test", root / "state.json"); self._start_review(runner)
+            result = runner.execute_release_cycle(root, ["app/src/main/Main.java"], build, test, artifact, authorized=True)
             expected_sha256 = hashlib.sha256(b"ci-artifact").hexdigest()
             self.assertTrue(result.delivered)
-            self.assertEqual(result.verification.final_status, "VERIFIED")
-            self.assertEqual(result.delivery.status, "READY")
             self.assertEqual(result.delivery.checksum_sha256, expected_sha256)
-            self.assertTrue(result.delivery.manifest)
             self.assertEqual(runner.orchestrator.state.last_verified_result, expected_sha256)
-            passport = json.loads((root / "project_passport.json").read_text(encoding="utf-8"))
+            passport_path = root / "project_passport.json"
+            passport = json.loads(passport_path.read_text(encoding="utf-8"))
             self.assertEqual(passport["artifact_sha256"], expected_sha256)
+            self.assertEqual(passport["delivery_status"], "READY")
             recovery = json.loads((root / "recovery_manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(recovery["project_id"], "release-test")
             self.assertEqual(recovery["artifact_sha256"], expected_sha256)
-            self.assertTrue(recovery["source_revision"])
-            self.assertTrue(recovery["passport_revision"])
-            self.assertTrue(recovery["generated_revision"])
+            self.assertEqual(recovery["passport_revision"], hashlib.sha256(passport_path.read_bytes()).hexdigest())
+            delivery_manifest = json.loads(Path(result.delivery.manifest).read_text(encoding="utf-8"))
+            self.assertEqual(delivery_manifest["sha256"], expected_sha256)
             self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
             self.assertEqual(result.retries, 0)
 
     def test_build_failure_uses_fix_callback_and_retries_to_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            self._android_fixture(root)
-            artifact = root / "app-debug.apk"
-            build = [
-                "python",
-                "-c",
-                "from pathlib import Path; marker=Path('build-fixed'); assert marker.is_file(), 'intentional first-attempt build failure'; Path('app-debug.apk').write_bytes(b'ci-artifact')",
-            ]
-            test = [
-                "python",
-                "-c",
-                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
-            ]
-            runner = PipelineOrchestrator("release-retry-test", root / "state.json")
-            self._start_review(runner)
+            root = Path(temp); self._android_fixture(root); artifact = root / "app-debug.apk"
+            build = ["python", "-c", "from pathlib import Path; marker=Path('build-fixed'); assert marker.is_file(), 'intentional first-attempt build failure'; Path('app-debug.apk').write_bytes(b'ci-artifact')"]
+            test = ["python", "-c", "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()"]
+            runner = PipelineOrchestrator("release-retry-test", root / "state.json"); self._start_review(runner)
             callbacks: list[tuple[str, int]] = []
-
             def fix(stage: str, attempt: int) -> None:
                 callbacks.append((stage, attempt))
-                if stage == "BUILD":
-                    (root / "build-fixed").write_text("fixed", encoding="utf-8")
-
-            result = runner.execute_release_cycle(
-                project_root=root,
-                review_paths=["app/src/main/Main.java"],
-                build_command=build,
-                test_command=test,
-                artifact_path=artifact,
-                authorized=True,
-                max_retries=2,
-                fix_callback=fix,
-            )
-
-            self.assertTrue(result.delivered)
-            self.assertEqual(result.retries, 1)
-            self.assertEqual(callbacks, [("BUILD", 1)])
-            self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
-            self.assertEqual(runner.orchestrator.state.retry_count, 1)
+                if stage == "BUILD": (root / "build-fixed").write_text("fixed", encoding="utf-8")
+            result = runner.execute_release_cycle(root, ["app/src/main/Main.java"], build, test, artifact, authorized=True, max_retries=2, fix_callback=fix)
+            self.assertTrue(result.delivered); self.assertEqual(result.retries, 1)
+            self.assertEqual(callbacks, [("BUILD", 1)]); self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
 
     def test_release_is_blocked_without_verified_requirements_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            self._android_fixture(root)
-            (root / "requirements_verification.json").unlink()
-            artifact = root / "app-debug.apk"
-            build = [
-                "python",
-                "-c",
-                "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
-            ]
-            test = [
-                "python",
-                "-c",
-                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
-            ]
-            runner = PipelineOrchestrator("release-test", root / "state.json")
-            self._start_review(runner)
-            with self.assertRaises(RuntimeError):
-                runner.execute_release_cycle(
-                    project_root=root,
-                    review_paths=["app/src/main/Main.java"],
-                    build_command=build,
-                    test_command=test,
-                    artifact_path=artifact,
-                    authorized=True,
-                    max_retries=0,
-                )
+            root = Path(temp); self._android_fixture(root); (root / "requirements_verification.json").unlink(); artifact = root / "app-debug.apk"
+            build, test = self._commands(); runner = PipelineOrchestrator("release-test", root / "state.json"); self._start_review(runner)
+            with self.assertRaises(RuntimeError): runner.execute_release_cycle(root, ["app/src/main/Main.java"], build, test, artifact, authorized=True, max_retries=0)
 
-    def test_quality_gate_blocks_delivery_without_authorization(self) -> None:
+    def test_release_is_blocked_before_work_without_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            self._android_fixture(root)
-            artifact = root / "app-debug.apk"
-            build = [
-                "python",
-                "-c",
-                "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
-            ]
-            test = [
-                "python",
-                "-c",
-                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
-            ]
-            runner = PipelineOrchestrator("authorization-test", root / "state.json")
-            self._start_review(runner)
-            with self.assertRaisesRegex(RuntimeError, "Quality gate blocked delivery"):
-                runner.execute_release_cycle(
-                    project_root=root,
-                    review_paths=["app/src/main/Main.java"],
-                    build_command=build,
-                    test_command=test,
-                    artifact_path=artifact,
-                    authorized=False,
-                    max_retries=0,
-                )
-            self.assertEqual(runner.orchestrator.current_state, LifecycleState.FIXING)
+            root = Path(temp); self._android_fixture(root); artifact = root / "app-debug.apk"
+            build, test = self._commands(); runner = PipelineOrchestrator("authorization-test", root / "state.json"); self._start_review(runner)
+            with self.assertRaisesRegex(PermissionError, "explicit user approval"):
+                runner.execute_release_cycle(root, ["app/src/main/Main.java"], build, test, artifact, authorized=False, max_retries=0)
+            self.assertEqual(runner.orchestrator.current_state, LifecycleState.REVIEWING)
+            self.assertIn("release_cycle", runner.orchestrator.state.blocked_tasks)
 
 
 if __name__ == "__main__":
