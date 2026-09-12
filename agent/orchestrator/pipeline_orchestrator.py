@@ -133,13 +133,7 @@ class PipelineOrchestrator:
                     return evidence.detail[len(prefix):].strip()
         return ""
 
-    def _write_recovery_manifest(
-        self,
-        root: Path,
-        artifact: Path,
-        delivery: DeliveryResult,
-        artifact_sha256: str,
-    ) -> Path:
+    def _write_recovery_manifest(self, root: Path, artifact: Path, delivery: DeliveryResult, artifact_sha256: str) -> Path:
         passport_path = self.orchestrator.passport_store.path
         passport_sha256 = hashlib.sha256(passport_path.read_bytes()).hexdigest() if passport_path.is_file() else "unavailable"
         source_revision = os.environ.get("GITHUB_SHA", "local-workspace")
@@ -163,17 +157,7 @@ class PipelineOrchestrator:
         manifest_path.write_text(manifest.to_json() + "\n", encoding="utf-8")
         return manifest_path
 
-    def execute_release_cycle(
-        self,
-        project_root: str | Path,
-        review_paths: Sequence[str],
-        build_command: Sequence[str],
-        test_command: Sequence[str],
-        artifact_path: str | Path,
-        authorized: bool = False,
-        max_retries: int = 2,
-        fix_callback: Callable[[str, int], None] | None = None,
-    ) -> ReleaseCycleResult:
+    def execute_release_cycle(self, project_root: str | Path, review_paths: Sequence[str], build_command: Sequence[str], test_command: Sequence[str], artifact_path: str | Path, authorized: bool = False, max_retries: int = 2, fix_callback: Callable[[str, int], None] | None = None) -> ReleaseCycleResult:
         """Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY."""
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be between 0 and 5")
@@ -181,8 +165,6 @@ class PipelineOrchestrator:
         artifact = Path(artifact_path).resolve()
         retries = 0
 
-        # Authorization is a hard precondition for generation/release work. A
-        # caller may provide explicit authorization or rely on persisted approval.
         approval_received = authorized or "requirements_and_plan" in self.orchestrator.state.received_approvals
         if not approval_received:
             self.orchestrator.record_error("User approval is required before BUILD, TEST, VERIFY, or DELIVERY.")
@@ -258,27 +240,14 @@ class PipelineOrchestrator:
             verification = self.verification_executor.hash_artifact(self.orchestrator.state.project_id, artifact)
             accessibility_ok = False
             if source_path is not None:
-                accessibility_ok = self.accessibility_verifier.verify_source(
-                    self.orchestrator.state.project_id, source_path
-                ).final_status == "VERIFIED"
-            compatibility_ok = self.compatibility_verifier.verify_project(
-                self.orchestrator.state.project_id, root
-            ).final_status == "VERIFIED"
-            completeness_ok = self.completeness_verifier.verify_project(
-                self.orchestrator.state.project_id, root
-            ).status == "VERIFIED"
+                accessibility_ok = self.accessibility_verifier.verify_source(self.orchestrator.state.project_id, source_path).final_status == "VERIFIED"
+            compatibility_ok = self.compatibility_verifier.verify_project(self.orchestrator.state.project_id, root).final_status == "VERIFIED"
+            completeness_ok = self.completeness_verifier.verify_project(self.orchestrator.state.project_id, root).status == "VERIFIED"
             privacy_report = self.privacy_guard.inspect_source(root, review_paths)
             privacy_ok = privacy_report.passed
             requirements_ok = self._requirements_verified(root)
 
-            if (
-                verification.final_status == "VERIFIED"
-                and accessibility_ok
-                and compatibility_ok
-                and completeness_ok
-                and privacy_ok
-                and requirements_ok
-            ):
+            if verification.final_status == "VERIFIED" and accessibility_ok and compatibility_ok and completeness_ok and privacy_ok and requirements_ok:
                 self.orchestrator.complete_task("verification")
                 artifact_sha256 = self._artifact_sha256(verification)
                 if not artifact_sha256:
@@ -299,12 +268,7 @@ class PipelineOrchestrator:
             if fix_callback:
                 fix_callback("VERIFY", retries)
 
-        quality = self.quality_gate.evaluate(
-            build_passed=build.success,
-            tests_passed=test.success,
-            verification_passed=verification.final_status == "VERIFIED",
-            approval_received=approval_received,
-        )
+        quality = self.quality_gate.evaluate(build_passed=build.success, tests_passed=test.success, verification_passed=verification.final_status == "VERIFIED", approval_received=approval_received)
         if not quality.passed:
             self.orchestrator.record_error("Quality gate blocked delivery: " + "; ".join(quality.reasons))
             self.orchestrator.transition_to(LifecycleState.FIXING)
@@ -329,9 +293,7 @@ class PipelineOrchestrator:
             artifact,
             project_id=self.orchestrator.state.project_id,
             evidence={
-                "review": "PASSED",
-                "build": "PASSED",
-                "tests": "PASSED",
+                "review": "PASSED", "build": "PASSED", "tests": "PASSED",
                 "requirements": requirements_ok,
                 "artifact_verification": verification.final_status,
                 "artifact_sha256": artifact_sha256,
@@ -347,8 +309,13 @@ class PipelineOrchestrator:
             self.orchestrator.record_error("Delivery gate blocked release.")
             self.orchestrator.transition_to(LifecycleState.FIXING)
             raise RuntimeError("Delivery blocked: " + "; ".join(delivery.reasons))
-        self._write_recovery_manifest(root, artifact, delivery, artifact_sha256)
+        if delivery.checksum_sha256 != artifact_sha256:
+            self.orchestrator.record_error("Delivery checksum does not match verification SHA-256.")
+            self.orchestrator.transition_to(LifecycleState.FIXING)
+            raise RuntimeError("Delivery checksum mismatch")
+
         self.orchestrator.complete_task("delivery")
         self.orchestrator.record_success("delivery_ready")
         self.orchestrator.transition_to(LifecycleState.COMPLETED)
+        self._write_recovery_manifest(root, artifact, delivery, artifact_sha256)
         return ReleaseCycleResult(review, build, test, verification, delivery, retries)
