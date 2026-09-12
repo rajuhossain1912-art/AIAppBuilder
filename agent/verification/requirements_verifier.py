@@ -15,6 +15,8 @@ class RequirementsVerificationReport:
     status: str
     required_capabilities: tuple[str, ...]
     generated_capabilities: tuple[str, ...]
+    implemented_capabilities: tuple[str, ...]
+    unsupported_capabilities: tuple[str, ...]
     missing_capabilities: tuple[str, ...]
     missing_files: tuple[str, ...]
     unresolved_questions: tuple[str, ...]
@@ -42,7 +44,10 @@ class RequirementsVerifier:
         root = Path(project_root).resolve()
         required = _unique(plan.capabilities)
         generated = _unique(features.capabilities)
+        implemented = _unique(features.implemented_capabilities)
+        unsupported = _unique(features.unsupported_capabilities)
         missing = tuple(capability for capability in required if capability not in generated)
+        unimplemented_required = tuple(capability for capability in required if capability not in implemented)
         missing_files = tuple(
             relative for relative in features.files if not (root / relative).is_file()
         )
@@ -51,6 +56,10 @@ class RequirementsVerifier:
 
         if missing:
             reasons.append("Generated capability metadata does not cover every approved capability.")
+        if unimplemented_required:
+            reasons.append(
+                "The generated project does not yet contain a real implementation for every approved capability."
+            )
         if missing_files:
             reasons.append("Generated feature files are missing from the project output.")
         if unresolved:
@@ -62,6 +71,8 @@ class RequirementsVerifier:
             status="VERIFIED" if not reasons else "FAILED",
             required_capabilities=required,
             generated_capabilities=generated,
+            implemented_capabilities=implemented,
+            unsupported_capabilities=unsupported,
             missing_capabilities=missing,
             missing_files=missing_files,
             unresolved_questions=unresolved,
