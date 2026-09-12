@@ -27,11 +27,15 @@ jobs:
       - name: Run Android generator and composition tests
         run: python -m unittest discover -s agent/android -p 'test_*.py' -v
 
+      - name: Run security and privacy tests
+        run: python -m unittest discover -s agent/security -p 'test_*.py' -v
+
       - name: Generate feature-complete CI app through pipeline
         run: |
           python - <<'PY'
           from pathlib import Path
           from agent.pipeline import AgentPipeline
+          from agent.security import PrivacyGuard
           from agent.verification import (
               AndroidAccessibilityVerifier,
               AndroidCompletenessVerifier,
@@ -59,6 +63,8 @@ jobs:
           assert completeness.status == CompletenessStatus.VERIFIED, completeness.findings
           compatibility = AndroidCompatibilityVerifier().verify_project('ci-project', generated.project.root)
           assert compatibility.final_status == VerificationStatus.VERIFIED
+          privacy = PrivacyGuard().inspect_source(generated.project.root, generated.features.files)
+          assert privacy.passed, privacy.findings
           PY
 
       - name: Set up Java
