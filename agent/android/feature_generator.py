@@ -16,6 +16,8 @@ class GeneratedAndroidFeatures:
     files: tuple[str, ...]
     family: str
     capabilities: tuple[str, ...] = ()
+    implemented_capabilities: tuple[str, ...] = ()
+    unsupported_capabilities: tuple[str, ...] = ()
 
 
 class AndroidFeatureGenerator:
@@ -42,4 +44,6 @@ class AndroidFeatureGenerator:
             files=(str(activity.relative_to(root)),),
             family=intent.family,
             capabilities=composed.capabilities,
+            implemented_capabilities=composed.implemented_capabilities,
+            unsupported_capabilities=composed.unsupported_capabilities,
         )
