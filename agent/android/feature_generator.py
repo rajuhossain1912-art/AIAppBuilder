@@ -15,7 +15,7 @@ class AndroidFeatureGenerationError(ValueError):
 class GeneratedAndroidFeatures:
     files: tuple[str, ...]
     family: str
-    capabilities: tuple[str, ...]
+    capabilities: tuple[str, ...] = ()
 
 
 class AndroidFeatureGenerator:
