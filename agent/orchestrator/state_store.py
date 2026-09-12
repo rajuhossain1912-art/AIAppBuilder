@@ -13,22 +13,27 @@ class StateStoreError(RuntimeError):
     """Raised when orchestrator state cannot be safely stored or loaded."""
 
 
+class StateStoreMissingError(StateStoreError):
+    """Raised when no durable orchestrator state exists yet."""
+
+
 class OrchestratorStateStore:
     """Persists one project's orchestrator state as structured JSON."""
 
     def __init__(self, state_path: str | Path) -> None:
-        path = Path(state_path)
-
-        if not str(path).strip():
+        if isinstance(state_path, str) and not state_path.strip():
+            raise ValueError("state_path must not be empty")
+        if state_path is None:
             raise ValueError("state_path must not be empty")
 
+        path = Path(state_path)
         self.path = path
 
     def save(self, state: OrchestratorState) -> None:
         """Atomically save the supplied state to disk."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-
         payload = self._serialize(state)
+        temporary_path: Path | None = None
 
         try:
             with NamedTemporaryFile(
@@ -52,9 +57,10 @@ class OrchestratorStateStore:
                 os.fsync(temporary_file.fileno())
 
             os.replace(temporary_path, self.path)
+            temporary_path = None
 
         except OSError as exc:
-            if "temporary_path" in locals():
+            if temporary_path is not None:
                 try:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
@@ -67,7 +73,7 @@ class OrchestratorStateStore:
     def load(self) -> OrchestratorState:
         """Load and validate orchestrator state from disk."""
         if not self.path.exists():
-            raise StateStoreError(
+            raise StateStoreMissingError(
                 f"Orchestrator state file does not exist: {self.path}"
             )
 
@@ -129,6 +135,8 @@ class OrchestratorStateStore:
         previous_state = None
 
         if previous_state_value is not None:
+            if not isinstance(previous_state_value, str):
+                raise StateStoreError("previous_state must be a string or null")
             try:
                 previous_state = LifecycleState(previous_state_value)
             except ValueError as exc:
@@ -136,32 +144,49 @@ class OrchestratorStateStore:
                     f"Unknown previous lifecycle state: {previous_state_value}"
                 ) from exc
 
-        retry_count = payload.get("retry_count", 0)
+        timestamp = payload.get("timestamp")
+        if not isinstance(timestamp, str) or not timestamp.strip():
+            raise StateStoreError("State is missing a valid timestamp")
 
-        if not isinstance(retry_count, int) or retry_count < 0:
+        current_task = payload.get("current_task")
+        if current_task is not None and not isinstance(current_task, str):
+            raise StateStoreError("current_task must be a string or null")
+
+        last_successful_operation = payload.get("last_successful_operation")
+        if last_successful_operation is not None and not isinstance(last_successful_operation, str):
+            raise StateStoreError(
+                "last_successful_operation must be a string or null"
+            )
+
+        last_verified_result = payload.get("last_verified_result")
+        if last_verified_result is not None and not isinstance(last_verified_result, str):
+            raise StateStoreError("last_verified_result must be a string or null")
+
+        retry_count = payload.get("retry_count", 0)
+        if not isinstance(retry_count, int) or isinstance(retry_count, bool) or retry_count < 0:
             raise StateStoreError("retry_count must be a non-negative integer")
 
         return OrchestratorState(
             project_id=project_id.strip(),
             current_state=lifecycle_state,
             previous_state=previous_state,
-            timestamp=str(payload.get("timestamp", "")),
-            current_task=payload.get("current_task"),
+            timestamp=timestamp.strip(),
+            current_task=current_task.strip() if current_task else None,
             completed_tasks=_string_list(payload.get("completed_tasks")),
             pending_tasks=_string_list(payload.get("pending_tasks")),
             blocked_tasks=_string_list(payload.get("blocked_tasks")),
             errors=_string_list(payload.get("errors")),
             retry_count=retry_count,
-            required_approvals=_string_list(
-                payload.get("required_approvals")
+            required_approvals=_string_list(payload.get("required_approvals")),
+            received_approvals=_string_list(payload.get("received_approvals")),
+            last_successful_operation=(
+                last_successful_operation.strip()
+                if last_successful_operation
+                else None
             ),
-            received_approvals=_string_list(
-                payload.get("received_approvals")
+            last_verified_result=(
+                last_verified_result.strip() if last_verified_result else None
             ),
-            last_successful_operation=payload.get(
-                "last_successful_operation"
-            ),
-            last_verified_result=payload.get("last_verified_result"),
         )
 
 
@@ -175,4 +200,4 @@ def _string_list(value: Any) -> list[str]:
     if not all(isinstance(item, str) for item in value):
         raise StateStoreError("State list values must all be strings")
 
-    return list(value)
+    return [item.strip() for item in value if item.strip()]
