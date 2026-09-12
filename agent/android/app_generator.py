@@ -21,7 +21,7 @@ class GeneratedAndroidApp:
 
 
 class AndroidAppGenerator:
-    """Connect planning, Android intent mapping, project creation, and feature generation."""
+    """Connect planning, approval, Android mapping, project and feature generation."""
 
     def __init__(
         self,
@@ -47,10 +47,7 @@ class AndroidAppGenerator:
             )
 
         intent = self.intent_builder.build(plan)
-        project = self.project_generator.generate(output_root, intent.spec)
+        output = Path(output_root).resolve()
+        project = self.project_generator.generate(output, intent.spec)
         features = self.feature_generator.generate(project.root, intent)
-        return GeneratedAndroidApp(
-            intent=intent,
-            project=project,
-            features=features,
-        )
+        return GeneratedAndroidApp(intent=intent, project=project, features=features)
