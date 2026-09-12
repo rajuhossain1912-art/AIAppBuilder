@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
+import json
+from datetime import datetime, timezone
 
 
 @dataclass
@@ -33,12 +35,19 @@ class DeliveryResult:
     artifact: str | None = None
     checksum_sha256: str | None = None
     reasons: list[str] = field(default_factory=list)
+    manifest: str | None = None
 
 
 class DeliveryEngine:
     """Allows delivery only after every required gate is explicitly satisfied."""
 
-    def prepare(self, gate: DeliveryGate, artifact_path: str | Path | None = None) -> DeliveryResult:
+    def prepare(
+        self,
+        gate: DeliveryGate,
+        artifact_path: str | Path | None = None,
+        project_id: str | None = None,
+        evidence: dict[str, object] | None = None,
+    ) -> DeliveryResult:
         reasons: list[str] = []
         checks = {
             "requirements_verified": "Requirements are not verified.",
@@ -61,9 +70,22 @@ class DeliveryEngine:
                 reasons.append("The claimed delivery artifact does not exist.")
             elif gate.ready:
                 digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                manifest_path = target.with_suffix(target.suffix + ".delivery.json")
+                manifest_data = {
+                    "project_id": project_id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "artifact": str(target),
+                    "sha256": digest,
+                    "gate": gate.__dict__,
+                    "evidence": evidence or {},
+                }
+                manifest_path.write_text(
+                    json.dumps(manifest_data, ensure_ascii=False, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
                 return DeliveryResult(
                     status="READY", artifact=str(target),
-                    checksum_sha256=digest,
+                    checksum_sha256=digest, manifest=str(manifest_path),
                 )
 
         return DeliveryResult(status="BLOCKED", reasons=reasons)
