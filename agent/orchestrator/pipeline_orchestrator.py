@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 from typing import Callable, Sequence
 
 from agent.build import BuildEngine, BuildResult
@@ -100,6 +101,23 @@ class PipelineOrchestrator:
         java_files = sorted((root / "app").rglob("*.java")) if (root / "app").is_dir() else []
         return java_files[0] if java_files else None
 
+    @staticmethod
+    def _requirements_verified(root: Path) -> bool:
+        evidence_path = root / "requirements_verification.json"
+        if not evidence_path.is_file():
+            return False
+        try:
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return False
+        return (
+            isinstance(evidence, dict)
+            and evidence.get("status") == "VERIFIED"
+            and not evidence.get("missing_capabilities")
+            and not evidence.get("missing_files")
+            and not evidence.get("unresolved_questions")
+        )
+
     def execute_release_cycle(
         self,
         project_root: str | Path,
@@ -140,8 +158,8 @@ class PipelineOrchestrator:
         build: BuildResult
         test: TestResult
         verification: VerificationReport
-        accessibility_ok = compatibility_ok = completeness_ok = False
-        privacy_ok = False
+        accessibility_ok = compatibility_ok = completeness_ok = privacy_ok = False
+        requirements_ok = self._requirements_verified(root)
 
         while True:
             self.orchestrator.transition_to(LifecycleState.BUILDING)
@@ -196,6 +214,7 @@ class PipelineOrchestrator:
             ).status == "VERIFIED"
             privacy_report = self.privacy_guard.inspect_source(root, review_paths)
             privacy_ok = privacy_report.passed
+            requirements_ok = self._requirements_verified(root)
 
             if (
                 verification.final_status == "VERIFIED"
@@ -203,6 +222,7 @@ class PipelineOrchestrator:
                 and compatibility_ok
                 and completeness_ok
                 and privacy_ok
+                and requirements_ok
             ):
                 self.orchestrator.complete_task("verification")
                 self.orchestrator.record_verified_result("artifact_sha256")
@@ -220,7 +240,7 @@ class PipelineOrchestrator:
                 fix_callback("VERIFY", retries)
 
         gate = DeliveryGate(
-            requirements_verified=True,
+            requirements_verified=requirements_ok,
             build_succeeded=build.success,
             tests_passed=test.success,
             review_blockers_resolved=not review.blocking,
@@ -241,6 +261,7 @@ class PipelineOrchestrator:
                 "review": "PASSED",
                 "build": "PASSED",
                 "tests": "PASSED",
+                "requirements": requirements_ok,
                 "artifact_verification": verification.final_status,
                 "accessibility": accessibility_ok,
                 "compatibility": compatibility_ok,
