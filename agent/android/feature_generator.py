@@ -6,6 +6,7 @@ from pathlib import Path
 from agent.android.app_spec_builder import AndroidBuildIntent
 from agent.android.audio_editor_generator import AudioEditorGenerator
 from agent.android.capability_composer import AndroidCapabilityComposer
+from agent.android.image_editor_generator import ImageEditorGenerator
 from agent.android.video_editor_generator import VideoEditorGenerator
 
 
@@ -29,6 +30,7 @@ class AndroidFeatureGenerator:
         self.composer = composer or AndroidCapabilityComposer()
         self.audio_editor = AudioEditorGenerator()
         self.video_editor = VideoEditorGenerator()
+        self.image_editor = ImageEditorGenerator()
 
     def generate(self, project_root: str | Path, intent: AndroidBuildIntent) -> GeneratedAndroidFeatures:
         if not isinstance(intent, AndroidBuildIntent):
@@ -60,6 +62,13 @@ class AndroidFeatureGenerator:
             if "video_editor" not in implemented:
                 implemented.append("video_editor")
             unsupported = [item for item in unsupported if item != "video_editor"]
+
+        if "image_editor" in intent.capabilities:
+            generated = self.image_editor.augment(source)
+            source = generated
+            if "image_editor" not in implemented:
+                implemented.append("image_editor")
+            unsupported = [item for item in unsupported if item != "image_editor"]
 
         activity.write_text(source, encoding="utf-8")
         return GeneratedAndroidFeatures(
