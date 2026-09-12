@@ -19,12 +19,7 @@ class GeneratedAndroidProject:
 
 
 class AndroidProjectGenerator:
-    """Generates a deterministic, dependency-light Android starter project.
-
-    This is a real project skeleton, not a claim that arbitrary natural-language
-    requirements have already been implemented. Feature generation builds on this
-    verified baseline.
-    """
+    """Generates a deterministic, dependency-light Android starter project."""
 
     def generate(self, output_root: str | Path, spec: AndroidProjectSpec) -> GeneratedAndroidProject:
         if not isinstance(spec, AndroidProjectSpec):
@@ -60,6 +55,7 @@ class AndroidProjectGenerator:
     def _settings(name: str) -> str:
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", name.strip())
         return (
+            "import org.gradle.api.initialization.resolve.RepositoriesMode\n\n"
             "pluginManagement {\n"
             "    repositories { google(); mavenCentral(); gradlePluginPortal() }\n"
             "}\n"
