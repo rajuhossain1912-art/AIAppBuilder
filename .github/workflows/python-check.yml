@@ -18,6 +18,8 @@ jobs:
           python-version: '3.12'
       - name: Compile Python sources
         run: python -m compileall -q agent memory
+      - name: Run Android unit tests
+        run: python -m unittest discover -s agent/android -p 'test_*.py' -v
       - name: Run lightweight import checks
         run: |
           python - <<'PY'
