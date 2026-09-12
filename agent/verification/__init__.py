@@ -1,5 +1,6 @@
 """Evidence-based verification primitives."""
 
+from .accessibility_verifier import AndroidAccessibilityVerifier
 from .verification_executor import (
     VerificationEvidence,
     VerificationExecutor,
@@ -8,6 +9,7 @@ from .verification_executor import (
 )
 
 __all__ = [
+    "AndroidAccessibilityVerifier",
     "VerificationEvidence",
     "VerificationExecutor",
     "VerificationReport",
