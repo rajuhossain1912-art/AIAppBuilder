@@ -9,11 +9,33 @@ from agent.orchestrator.state_model import LifecycleState
 
 
 class ReleaseCycleTests(unittest.TestCase):
+    def _android_fixture(self, root: Path) -> None:
+        (root / "app/src/main").mkdir(parents=True)
+        (root / "settings.gradle").write_text('rootProject.name = "Fixture"\ninclude(":app")\n', encoding="utf-8")
+        (root / "build.gradle").write_text('plugins { id "com.android.application" version "8.7.3" apply false }\n', encoding="utf-8")
+        (root / "app/build.gradle").write_text(
+            'plugins { id "com.android.application" }\n'
+            'android { namespace "com.example.fixture"; compileSdk 35; defaultConfig { '
+            'applicationId "com.example.fixture"; minSdk 23; targetSdk 35 } }\n',
+            encoding="utf-8",
+        )
+        (root / "app/src/main/AndroidManifest.xml").write_text(
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+            '  <application><activity android:name=".MainActivity" android:exported="true" /></application>\n'
+            '</manifest>\n',
+            encoding="utf-8",
+        )
+        source = root / "app/src/main/Main.java"
+        source.write_text(
+            'import android.widget.Button;\n'
+            'class Main { Button button; void label() { button.setContentDescription("Action"); } }\n',
+            encoding="utf-8",
+        )
+
     def test_review_build_test_verify_delivery_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            source = root / "Main.java"
-            source.write_text("class Main {}\n", encoding="utf-8")
+            self._android_fixture(root)
             artifact = root / "app-debug.apk"
 
             build = [
@@ -24,7 +46,7 @@ class ReleaseCycleTests(unittest.TestCase):
             test = [
                 "python",
                 "-c",
-                "from pathlib import Path; assert Path('Main.java').is_file()",
+                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
             ]
 
             state = root / "state.json"
@@ -37,7 +59,7 @@ class ReleaseCycleTests(unittest.TestCase):
 
             result = runner.execute_release_cycle(
                 project_root=root,
-                review_paths=["Main.java"],
+                review_paths=["app/src/main/Main.java"],
                 build_command=build,
                 test_command=test,
                 artifact_path=artifact,
@@ -47,6 +69,7 @@ class ReleaseCycleTests(unittest.TestCase):
             self.assertTrue(result.delivered)
             self.assertEqual(result.verification.final_status, "VERIFIED")
             self.assertEqual(result.delivery.status, "READY")
+            self.assertTrue(result.delivery.manifest)
             self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
             self.assertEqual(result.retries, 0)
 
