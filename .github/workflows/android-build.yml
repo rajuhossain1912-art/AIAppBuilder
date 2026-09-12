@@ -18,19 +18,24 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Generate verified starter project
+      - name: Generate feature-complete CI app
         run: |
           python - <<'PY'
           from pathlib import Path
-          from agent.android import AndroidProjectGenerator
-          from agent.templates.android_template import AndroidProjectSpec
+          from agent.android import AndroidFeatureGenerator, AndroidProjectGenerator
+          from agent.android.app_spec_builder import AndroidBuildIntentBuilder
+          from agent.pipeline import AgentPipeline
 
-          spec = AndroidProjectSpec(
-              project_name='CI Build App',
-              package_name='com.example.cibuildapp',
-              mode='hybrid',
-          )
-          AndroidProjectGenerator().generate(Path('build/ci-android-app'), spec)
+          request = 'Create an accessible calculator app that works offline.'
+          intake = AgentPipeline().intake(request)
+          intent = AndroidBuildIntentBuilder().build(intake.plan)
+          root = Path('build/ci-android-app')
+          AndroidProjectGenerator().generate(root, intent.spec)
+          generated = AndroidFeatureGenerator().generate(root, intent)
+          assert generated.family == 'utility'
+          source = (root / generated.files[0]).read_text(encoding='utf-8')
+          assert 'Double.parseDouble' in source
+          assert 'setContentDescription' in source
           PY
 
       - name: Set up Java
