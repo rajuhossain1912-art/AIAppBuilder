@@ -24,6 +24,9 @@ jobs:
       - name: Run requirement capability tests
         run: python -m unittest discover -s agent/requirements -p 'test_*.py' -v
 
+      - name: Run Android generator and composition tests
+        run: python -m unittest discover -s agent/android -p 'test_*.py' -v
+
       - name: Generate feature-complete CI app through pipeline
         run: |
           python - <<'PY'
