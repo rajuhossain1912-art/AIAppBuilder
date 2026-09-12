@@ -125,7 +125,10 @@ import java.nio.ByteBuffer;
                     info.offset = 0;
                     info.size = size;
                     info.presentationTimeUs = timeUs - startUs;
-                    info.flags = extractor.getSampleFlags();
+                    int sampleFlags = extractor.getSampleFlags();
+                    info.flags = (sampleFlags & MediaExtractor.SAMPLE_FLAG_SYNC) != 0
+                            ? MediaCodec.BUFFER_FLAG_KEY_FRAME
+                            : 0;
                     muxer.writeSampleData(muxTrack, buffer, info);
                 }
                 extractor.advance();
