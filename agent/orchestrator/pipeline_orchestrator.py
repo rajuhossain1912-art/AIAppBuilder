@@ -62,7 +62,6 @@ class PipelineOrchestrator:
         self.orchestrator.transition_to(LifecycleState.UNDERSTANDING)
         result = self.pipeline.intake(user_request)
         self.orchestrator.complete_task("client_intake")
-
         if result.needs_user_confirmation:
             self.orchestrator.request_approval("requirements_and_plan")
             self.orchestrator.transition_to(LifecycleState.AWAITING_CONFIRMATION)
@@ -76,7 +75,6 @@ class PipelineOrchestrator:
             raise ValueError("result belongs to a different orchestrator")
         if result.intake.needs_user_confirmation:
             raise ValueError("Clarifying questions must be resolved before generation")
-
         self.orchestrator.receive_approval("requirements_and_plan")
         self.orchestrator.transition_to(LifecycleState.GENERATING)
         self.orchestrator.set_task("android_generation")
@@ -93,8 +91,8 @@ class PipelineOrchestrator:
 
     @staticmethod
     def _android_source_path(root: Path, review_paths: Sequence[str]) -> Path | None:
-        candidates = [root / p for p in review_paths if p.endswith((".java", ".kt", ".xml"))]
-        for candidate in candidates:
+        for relative in review_paths:
+            candidate = root / relative
             if candidate.suffix == ".java" and candidate.is_file():
                 return candidate
         java_files = sorted((root / "app").rglob("*.java")) if (root / "app").is_dir() else []
@@ -111,12 +109,7 @@ class PipelineOrchestrator:
         max_retries: int = 2,
         fix_callback: Callable[[str, int], None] | None = None,
     ) -> ReleaseCycleResult:
-        """Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY.
-
-        Verification failures now re-enter the complete build/test/verify cycle instead
-        of escaping to the caller. Accessibility, completeness and compatibility are
-        evidence-backed gates rather than hard-coded delivery flags.
-        """
+        """Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY."""
         if max_retries < 0 or max_retries > 5:
             raise ValueError("max_retries must be between 0 and 5")
         root = Path(project_root).resolve()
@@ -141,13 +134,11 @@ class PipelineOrchestrator:
         self.orchestrator.complete_task("review")
         self.orchestrator.record_success("review_passed")
 
+        source_path = self._android_source_path(root, review_paths)
         build: BuildResult
         test: TestResult
         verification: VerificationReport
-        accessibility_ok = False
-        compatibility_ok = False
-        completeness_ok = False
-        source_path = self._android_source_path(root, review_paths)
+        accessibility_ok = compatibility_ok = completeness_ok = False
 
         while True:
             self.orchestrator.transition_to(LifecycleState.BUILDING)
@@ -190,9 +181,7 @@ class PipelineOrchestrator:
             self.orchestrator.set_task("verification")
             verification = self.verification_executor.hash_artifact(self.orchestrator.state.project_id, artifact)
             accessibility_ok = False
-            compatibility_ok = False
-            completeness_ok = False
-            if source_path is not None and source_path.suffix == ".java":
+            if source_path is not None:
                 accessibility_ok = self.accessibility_verifier.verify_source(
                     self.orchestrator.state.project_id, source_path
                 ).final_status == "VERIFIED"
@@ -203,10 +192,9 @@ class PipelineOrchestrator:
                 self.orchestrator.state.project_id, root
             ).status == "VERIFIED"
 
-            verification_ok = verification.final_status == "VERIFIED" and accessibility_ok and compatibility_ok and completeness_ok
-            if verification_ok:
+            if verification.final_status == "VERIFIED" and accessibility_ok and compatibility_ok and completeness_ok:
                 self.orchestrator.complete_task("verification")
-                self.orchestrator.mark_verified("artifact_sha256")
+                self.orchestrator.record_verified_result("artifact_sha256")
                 break
 
             if retries >= max_retries:
@@ -225,10 +213,7 @@ class PipelineOrchestrator:
             build_succeeded=build.success,
             tests_passed=test.success,
             review_blockers_resolved=not review.blocking,
-            security_ok=not any(
-                f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"}
-                for f in review.findings
-            ),
+            security_ok=not any(f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"} for f in review.findings),
             accessibility_ok=accessibility_ok,
             compatibility_ok=compatibility_ok and completeness_ok,
             artifact_verified=verification.final_status == "VERIFIED",
