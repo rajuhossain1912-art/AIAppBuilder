@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -82,10 +83,21 @@ class ReleaseCycleTests(unittest.TestCase):
                 authorized=True,
             )
 
+            expected_sha256 = hashlib.sha256(b"ci-artifact").hexdigest()
             self.assertTrue(result.delivered)
             self.assertEqual(result.verification.final_status, "VERIFIED")
             self.assertEqual(result.delivery.status, "READY")
+            self.assertEqual(result.delivery.checksum_sha256, expected_sha256)
             self.assertTrue(result.delivery.manifest)
+            self.assertEqual(runner.orchestrator.state.last_verified_result, expected_sha256)
+            passport = json.loads((root / "project_passport.json").read_text(encoding="utf-8"))
+            self.assertEqual(passport["artifact_sha256"], expected_sha256)
+            recovery = json.loads((root / "recovery_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(recovery["project_id"], "release-test")
+            self.assertEqual(recovery["artifact_sha256"], expected_sha256)
+            self.assertTrue(recovery["source_revision"])
+            self.assertTrue(recovery["passport_revision"])
+            self.assertTrue(recovery["generated_revision"])
             self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
             self.assertEqual(result.retries, 0)
 
@@ -158,6 +170,35 @@ class ReleaseCycleTests(unittest.TestCase):
                     authorized=True,
                     max_retries=0,
                 )
+
+    def test_quality_gate_blocks_delivery_without_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._android_fixture(root)
+            artifact = root / "app-debug.apk"
+            build = [
+                "python",
+                "-c",
+                "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
+            ]
+            test = [
+                "python",
+                "-c",
+                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
+            ]
+            runner = PipelineOrchestrator("authorization-test", root / "state.json")
+            self._start_review(runner)
+            with self.assertRaisesRegex(RuntimeError, "Quality gate blocked delivery"):
+                runner.execute_release_cycle(
+                    project_root=root,
+                    review_paths=["app/src/main/Main.java"],
+                    build_command=build,
+                    test_command=test,
+                    artifact_path=artifact,
+                    authorized=False,
+                    max_retries=0,
+                )
+            self.assertEqual(runner.orchestrator.current_state, LifecycleState.FIXING)
 
 
 if __name__ == "__main__":
