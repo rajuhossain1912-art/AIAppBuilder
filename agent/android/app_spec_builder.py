@@ -13,8 +13,8 @@ class AndroidBuildIntent:
 
     spec: AndroidProjectSpec
     family: str
-    capabilities: tuple[str, ...]
-    rationale: tuple[str, ...]
+    rationale: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
 
 
 class AndroidBuildIntentBuilder:
