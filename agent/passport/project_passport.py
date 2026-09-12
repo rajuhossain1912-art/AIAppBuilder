@@ -15,7 +15,7 @@ class ProjectPassport:
     provider migration and repository recovery.
     """
 
-    schema_version: int = 1
+    schema_version: int = 2
     project_id: str = ""
     project_name: str = ""
     package_name: str = ""
@@ -40,9 +40,10 @@ class ProjectPassport:
     blocked_operations: list[str] = field(default_factory=list)
     known_errors: list[str] = field(default_factory=list)
     recovery_notes: list[str] = field(default_factory=list)
+    audit_log: list[dict[str, Any]] = field(default_factory=list)
 
     def validate(self) -> None:
-        if self.schema_version != 1:
+        if self.schema_version != 2:
             raise ValueError("Unsupported Project Passport schema version")
         if not isinstance(self.project_id, str) or not self.project_id.strip():
             raise ValueError("project_id must not be empty")
@@ -59,6 +60,13 @@ class ProjectPassport:
             value = getattr(self, field_name)
             if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
                 raise ValueError(f"{field_name} must be a list of strings")
+        if not isinstance(self.audit_log, list):
+            raise ValueError("audit_log must be a list")
+        for entry in self.audit_log:
+            if not isinstance(entry, dict):
+                raise ValueError("audit_log entries must be objects")
+            if not all(isinstance(key, str) for key in entry):
+                raise ValueError("audit_log keys must be strings")
 
     def to_dict(self) -> dict[str, Any]:
         self.validate()
@@ -71,7 +79,12 @@ class ProjectPassport:
     def from_dict(cls, data: dict[str, Any]) -> "ProjectPassport":
         if not isinstance(data, dict):
             raise ValueError("passport data must be an object")
-        passport = cls(**data)
+        # Backward-compatible migration from schema v1.
+        migrated = dict(data)
+        if migrated.get("schema_version") == 1:
+            migrated["schema_version"] = 2
+            migrated.setdefault("audit_log", [])
+        passport = cls(**migrated)
         passport.validate()
         return passport
 
