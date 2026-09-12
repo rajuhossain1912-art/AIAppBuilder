@@ -63,11 +63,13 @@ class AndroidBuildIntentBuilder:
     @staticmethod
     def _mode(plan: ProjectPlan) -> str:
         text = " ".join(
-            plan.functional_requirements
+            [plan.goal]
+            + plan.functional_requirements
             + plan.non_functional_requirements
+            + plan.compatibility_requirements
             + plan.components
         ).lower()
-        if any(token in text for token in ("api", "online", "web", "server", "cloud")):
+        if any(token in text for token in ("api", "online", "web", "server", "cloud", "internet")):
             return "online"
         return "offline"
 
