@@ -181,18 +181,12 @@ class PipelineOrchestrator:
         artifact = Path(artifact_path).resolve()
         retries = 0
 
-        # Authorization is a hard precondition for generation/release work.  A
-        # caller may provide explicit authorization or rely on an approval that
-        # was already persisted in the Project Passport/state store.
+        # Authorization is a hard precondition for generation/release work. A
+        # caller may provide explicit authorization or rely on persisted approval.
         approval_received = authorized or "requirements_and_plan" in self.orchestrator.state.received_approvals
         if not approval_received:
             self.orchestrator.record_error("User approval is required before BUILD, TEST, VERIFY, or DELIVERY.")
             self.orchestrator.block_task("release_cycle")
-            if self.orchestrator.current_state not in {
-                LifecycleState.AWAITING_CONFIRMATION,
-                LifecycleState.FIXING,
-            }:
-                self.orchestrator.transition_to(LifecycleState.FIXING)
             raise PermissionError("Release cycle requires explicit user approval")
         if authorized and "requirements_and_plan" not in self.orchestrator.state.received_approvals:
             self.orchestrator.receive_approval("requirements_and_plan")
