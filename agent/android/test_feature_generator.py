@@ -81,6 +81,22 @@ class AndroidFeatureGeneratorTests(unittest.TestCase):
         self.assertIn("C4", source)
         self.assertIn("setContentDescription", source)
 
+    def test_typing_keyboard_generates_accessible_bangla_english_input_controls(self):
+        request = "Create an accessible Bangla and English typing keyboard app."
+        intent = self._intent(request)
+        self.assertIn("typing_keyboard", intent.capabilities)
+        with tempfile.TemporaryDirectory() as tmp:
+            self.project_generator.generate(tmp, intent.spec)
+            result = self.generator.generate(tmp, intent)
+            source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
+        self.assertIn("typing_keyboard", result.implemented_capabilities)
+        self.assertNotIn("typing_keyboard", result.unsupported_capabilities)
+        self.assertIn("keyButton", source)
+        self.assertIn("Q W E R T Y U I O P", source)
+        self.assertIn("অ", source)
+        self.assertIn("Backspace", source)
+        self.assertIn("setContentDescription", source)
+
     def test_requires_existing_generated_project(self):
         intent = self._intent("Create a calculator app.")
         with tempfile.TemporaryDirectory() as tmp:
