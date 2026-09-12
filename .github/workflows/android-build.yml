@@ -47,7 +47,7 @@ jobs:
           request = (
               'Create an accessible offline multimedia utility with calculator, '
               'audio editor trim split preview export, video editor trim split preview export, '
-              'text to speech, music tones, image selection and video selection.'
+              'image editor rotate grayscale export, text to speech, music tones, image selection and video selection.'
           )
           pipeline = AgentPipeline()
           intake = pipeline.intake(request)
@@ -65,6 +65,10 @@ jobs:
           assert 'MediaMuxer' in source
           assert 'Trim and export' in source
           assert 'Trim and export video' in source
+          assert 'BitmapFactory' in source
+          assert 'Rotate image 90 degrees' in source
+          assert 'Convert image to grayscale' in source
+          assert 'Export edited image' in source
           assert 'TextToSpeech' in source
           assert 'AudioTrack' in source
           assert 'setContentDescription' in source
