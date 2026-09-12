@@ -14,6 +14,7 @@ class DeliveryGate:
     tests_passed: bool = False
     review_blockers_resolved: bool = False
     security_ok: bool = False
+    privacy_ok: bool = False
     accessibility_ok: bool = False
     compatibility_ok: bool = False
     artifact_verified: bool = False
@@ -23,7 +24,7 @@ class DeliveryGate:
     def ready(self) -> bool:
         return all((
             self.requirements_verified, self.build_succeeded, self.tests_passed,
-            self.review_blockers_resolved, self.security_ok,
+            self.review_blockers_resolved, self.security_ok, self.privacy_ok,
             self.accessibility_ok, self.compatibility_ok,
             self.artifact_verified, self.authorized,
         ))
@@ -55,6 +56,7 @@ class DeliveryEngine:
             "tests_passed": "Required tests have not passed.",
             "review_blockers_resolved": "Release-blocking review findings remain.",
             "security_ok": "Security verification is incomplete.",
+            "privacy_ok": "Privacy verification is incomplete.",
             "accessibility_ok": "Accessibility verification is incomplete.",
             "compatibility_ok": "Compatibility verification is incomplete.",
             "artifact_verified": "Artifact verification is incomplete.",
