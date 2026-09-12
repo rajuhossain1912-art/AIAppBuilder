@@ -9,6 +9,7 @@ from agent.android.project_generator import AndroidProjectGenerator, GeneratedAn
 from agent.planning import ProjectPlan
 from agent.quality import PerformancePolicy
 from agent.verification import AndroidAccessibilityVerifier, VerificationStatus
+from agent.verification.requirements_verifier import RequirementsVerifier
 
 
 class AndroidAppGenerationError(ValueError):
@@ -32,12 +33,14 @@ class AndroidAppGenerator:
         feature_generator: AndroidFeatureGenerator | None = None,
         performance_policy: PerformancePolicy | None = None,
         accessibility_verifier: AndroidAccessibilityVerifier | None = None,
+        requirements_verifier: RequirementsVerifier | None = None,
     ) -> None:
         self.intent_builder = intent_builder or AndroidBuildIntentBuilder()
         self.project_generator = project_generator or AndroidProjectGenerator()
         self.feature_generator = feature_generator or AndroidFeatureGenerator()
         self.performance_policy = performance_policy or PerformancePolicy()
         self.accessibility_verifier = accessibility_verifier or AndroidAccessibilityVerifier()
+        self.requirements_verifier = requirements_verifier or RequirementsVerifier()
 
     def generate(
         self,
@@ -82,7 +85,10 @@ class AndroidAppGenerator:
             )
             for source_path in java_sources
         ]
-        failed = [report for report in accessibility_reports if report.final_status != VerificationStatus.VERIFIED]
+        failed = [
+            report for report in accessibility_reports
+            if report.final_status != VerificationStatus.VERIFIED
+        ]
         if failed:
             details = "; ".join(
                 evidence.detail
@@ -93,6 +99,18 @@ class AndroidAppGenerator:
             raise AndroidAppGenerationError(
                 "Generated Android app failed the mandatory global accessibility gate. "
                 + (details or "Accessibility evidence is insufficient.")
+            )
+
+        requirements = self.requirements_verifier.verify(
+            plan,
+            features,
+            project.root,
+        )
+        if not requirements.passed:
+            reasons = "; ".join(requirements.reasons)
+            raise AndroidAppGenerationError(
+                "Generated Android app failed the approved-requirements gate. "
+                + (reasons or "Required capabilities are not fully implemented.")
             )
 
         return GeneratedAndroidApp(intent=intent, project=project, features=features)
