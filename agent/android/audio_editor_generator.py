@@ -90,7 +90,9 @@ class AudioEditorGenerator:
         if (selectedAudioUri == null) { status.setText(\"Choose an audio file first\"); return; }
         try {
             MediaExtractor extractor = new MediaExtractor();
-            extractor.setDataSource(getContentResolver().openFileDescriptor(selectedAudioUri, \"r\").getFileDescriptor());
+            android.os.ParcelFileDescriptor descriptor = getContentResolver().openFileDescriptor(selectedAudioUri, \"r\");
+            if (descriptor == null) throw new IOException(\"Unable to open audio\");
+            extractor.setDataSource(descriptor.getFileDescriptor());
             int audioTrack = -1;
             for (int i = 0; i < extractor.getTrackCount(); i++) {
                 MediaFormat format = extractor.getTrackFormat(i);
@@ -109,7 +111,7 @@ class AudioEditorGenerator:
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
             ByteBuffer buffer = ByteBuffer.allocateDirect(1024 * 1024);
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
-            while (true) {
+            for (int sampleIndex = 0; sampleIndex < 1000000; sampleIndex++) {
                 int size = extractor.readSampleData(buffer, 0);
                 if (size < 0) break;
                 long timeUs = extractor.getSampleTime();
@@ -126,6 +128,7 @@ class AudioEditorGenerator:
             }
             muxer.stop();
             muxer.release();
+            descriptor.close();
             extractor.release();
             status.setText(\"Exported: \" + output.getName());
         } catch (Exception error) {
