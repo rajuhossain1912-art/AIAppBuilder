@@ -34,6 +34,7 @@ class Orchestrator:
         self.passport_store = ProjectPassportStore(
             Path(state_path).with_name("project_passport.json")
         )
+        self._last_audit_signature: tuple | None = None
 
     @property
     def state(self) -> OrchestratorState:
@@ -129,6 +130,23 @@ class Orchestrator:
     def snapshot(self) -> dict:
         return self.state_manager.snapshot()
 
+    def _audit_signature(self) -> tuple:
+        state = self.state
+        return (
+            state.current_state.value,
+            state.previous_state.value if state.previous_state else None,
+            state.current_task,
+            tuple(state.completed_tasks),
+            tuple(state.pending_tasks),
+            tuple(state.blocked_tasks),
+            tuple(state.errors),
+            state.retry_count,
+            tuple(state.required_approvals),
+            tuple(state.received_approvals),
+            state.last_successful_operation,
+            state.last_verified_result,
+        )
+
     def _sync_passport(self) -> None:
         try:
             passport = self.passport_store.load()
@@ -187,6 +205,29 @@ class Orchestrator:
 
         if os.environ.get("GITHUB_SHA"):
             passport.source_revision = os.environ["GITHUB_SHA"]
+
+        signature = self._audit_signature()
+        if signature != self._last_audit_signature:
+            passport.audit_log.append(
+                {
+                    "timestamp": now,
+                    "state": self.state.current_state.value,
+                    "previous_state": (
+                        self.state.previous_state.value
+                        if self.state.previous_state else None
+                    ),
+                    "current_task": self.state.current_task,
+                    "completed_operations": list(self.state.completed_tasks),
+                    "blocked_operations": list(self.state.blocked_tasks),
+                    "retry_count": self.state.retry_count,
+                    "last_successful_operation": self.state.last_successful_operation,
+                    "last_verified_result": self.state.last_verified_result,
+                }
+            )
+            # Keep the passport portable and bounded while retaining the recent
+            # lifecycle history needed for recovery and audit.
+            passport.audit_log = passport.audit_log[-1000:]
+            self._last_audit_signature = signature
 
         self.passport_store.save(passport)
 
