@@ -8,7 +8,11 @@ from .state_model import (
     OrchestratorStateManager,
     StateTransitionError,
 )
-from .state_store import OrchestratorStateStore, StateStoreError
+from .state_store import (
+    OrchestratorStateStore,
+    StateStoreError,
+    StateStoreMissingError,
+)
 
 
 class OrchestratorError(RuntimeError):
@@ -18,11 +22,7 @@ class OrchestratorError(RuntimeError):
 class Orchestrator:
     """Central lifecycle coordinator for one AIAppBuilder project."""
 
-    def __init__(
-        self,
-        project_id: str,
-        state_path: str,
-    ) -> None:
+    def __init__(self, project_id: str, state_path: str) -> None:
         self.project_id = project_id
         self.state_manager = OrchestratorStateManager(project_id)
         self.state_store = OrchestratorStateStore(state_path)
@@ -36,11 +36,19 @@ class Orchestrator:
         return self.state_manager.current_state
 
     def start(self) -> OrchestratorState:
-        """Start or restore the project lifecycle."""
+        """Start or restore the project lifecycle.
+
+        A missing state file starts a new project. A corrupted or invalid
+        state file is surfaced as an error rather than silently overwritten.
+        """
         try:
             restored_state = self.state_store.load()
-        except StateStoreError:
+        except StateStoreMissingError:
             restored_state = None
+        except StateStoreError as exc:
+            raise OrchestratorError(
+                "Unable to restore orchestrator state"
+            ) from exc
 
         if restored_state is not None:
             if restored_state.project_id != self.project_id:
