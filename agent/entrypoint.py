@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from agent.orchestrator import LifecycleState, PipelineOrchestrator
+from agent.orchestrator import LifecycleState, OrchestratedIntake, PipelineOrchestrator
 
 DEFAULT_STATE_ROOT = Path("memory/runtime")
 DEFAULT_WORK_ROOT = Path(".agent-work")
@@ -94,12 +94,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         request = pending.read_text(encoding="utf-8").strip()
-        result = agent.intake(request)
-        if result.intake.needs_user_confirmation:
+        intake_result = agent.pipeline.intake(request)
+        if intake_result.needs_user_confirmation:
             print("ERROR: clarification questions remain. Resolve them and run 'intake' again.")
-            _print_intake(result)
+            _print_intake(OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator))
             return 2
 
+        # The approval is supplied explicitly on this command. The generation
+        # method performs the lifecycle transition and mandatory pre-build gates.
+        result = OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator)
         output_root = Path(args.work_root) / args.project_id
         output_root.mkdir(parents=True, exist_ok=True)
         generated = agent.approve_and_generate(result, output_root)
