@@ -47,12 +47,18 @@ class ReleaseCycleTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _start_review(self, runner: PipelineOrchestrator) -> None:
+        runner.orchestrator.start()
+        runner.orchestrator.transition_to(LifecycleState.UNDERSTANDING)
+        runner.orchestrator.transition_to(LifecycleState.PLANNING)
+        runner.orchestrator.transition_to(LifecycleState.GENERATING)
+        runner.orchestrator.transition_to(LifecycleState.REVIEWING)
+
     def test_review_build_test_verify_delivery_cycle(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self._android_fixture(root)
             artifact = root / "app-debug.apk"
-
             build = [
                 "python",
                 "-c",
@@ -64,13 +70,8 @@ class ReleaseCycleTests(unittest.TestCase):
                 "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
             ]
 
-            state = root / "state.json"
-            runner = PipelineOrchestrator("release-test", state)
-            runner.orchestrator.start()
-            runner.orchestrator.transition_to(LifecycleState.UNDERSTANDING)
-            runner.orchestrator.transition_to(LifecycleState.PLANNING)
-            runner.orchestrator.transition_to(LifecycleState.GENERATING)
-            runner.orchestrator.transition_to(LifecycleState.REVIEWING)
+            runner = PipelineOrchestrator("release-test", root / "state.json")
+            self._start_review(runner)
 
             result = runner.execute_release_cycle(
                 project_root=root,
@@ -87,6 +88,47 @@ class ReleaseCycleTests(unittest.TestCase):
             self.assertTrue(result.delivery.manifest)
             self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
             self.assertEqual(result.retries, 0)
+
+    def test_build_failure_uses_fix_callback_and_retries_to_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._android_fixture(root)
+            artifact = root / "app-debug.apk"
+            build = [
+                "python",
+                "-c",
+                "from pathlib import Path; marker=Path('build-fixed'); assert marker.is_file(), 'intentional first-attempt build failure'; Path('app-debug.apk').write_bytes(b'ci-artifact')",
+            ]
+            test = [
+                "python",
+                "-c",
+                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
+            ]
+            runner = PipelineOrchestrator("release-retry-test", root / "state.json")
+            self._start_review(runner)
+            callbacks: list[tuple[str, int]] = []
+
+            def fix(stage: str, attempt: int) -> None:
+                callbacks.append((stage, attempt))
+                if stage == "BUILD":
+                    (root / "build-fixed").write_text("fixed", encoding="utf-8")
+
+            result = runner.execute_release_cycle(
+                project_root=root,
+                review_paths=["app/src/main/Main.java"],
+                build_command=build,
+                test_command=test,
+                artifact_path=artifact,
+                authorized=True,
+                max_retries=2,
+                fix_callback=fix,
+            )
+
+            self.assertTrue(result.delivered)
+            self.assertEqual(result.retries, 1)
+            self.assertEqual(callbacks, [("BUILD", 1)])
+            self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
+            self.assertEqual(runner.orchestrator.state.retry_count, 1)
 
     def test_release_is_blocked_without_verified_requirements_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -105,11 +147,7 @@ class ReleaseCycleTests(unittest.TestCase):
                 "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
             ]
             runner = PipelineOrchestrator("release-test", root / "state.json")
-            runner.orchestrator.start()
-            runner.orchestrator.transition_to(LifecycleState.UNDERSTANDING)
-            runner.orchestrator.transition_to(LifecycleState.PLANNING)
-            runner.orchestrator.transition_to(LifecycleState.GENERATING)
-            runner.orchestrator.transition_to(LifecycleState.REVIEWING)
+            self._start_review(runner)
             with self.assertRaises(RuntimeError):
                 runner.execute_release_cycle(
                     project_root=root,
