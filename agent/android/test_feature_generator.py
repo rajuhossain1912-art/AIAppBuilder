@@ -59,11 +59,11 @@ class AndroidFeatureGeneratorTests(unittest.TestCase):
             source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
         self.assertTrue(expected.issubset(set(result.capabilities)))
         self.assertIn("TextToSpeech", source)
-        self.assertIn("Video capability", source)
-        self.assertIn("Image capability", source)
-        self.assertIn("News and newspaper capability", source)
-        self.assertIn("Text and content capability", source)
-        self.assertIn("Online service capability", source)
+        self.assertIn("Choose video", source)
+        self.assertIn("Choose image", source)
+        self.assertIn("News and newspaper", source)
+        self.assertIn("Write content", source)
+        self.assertIn("Open online service", source)
 
     def test_music_and_instrument_generate_real_tone_controls(self):
         request = "Create an accessible music app with guitar, harmonium, tabla, piano and notes."
