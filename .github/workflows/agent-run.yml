@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       action:
-        description: 'review first, or generate after you have approved the reviewed requirements'
+        description: 'review first, or generate and run the full release cycle after approval'
         required: true
         default: 'review'
         type: choice
@@ -21,7 +21,7 @@ on:
           - review
           - generate
       approved:
-        description: 'Explicit approval for source generation'
+        description: 'Explicit approval for source generation and release'
         required: true
         default: false
         type: boolean
@@ -31,16 +31,20 @@ permissions:
   actions: read
 
 jobs:
-  agent:
+  privacy-gate:
     runs-on: ubuntu-latest
+    if: ${{ github.event.repository.private == false }}
     steps:
-      - name: Refuse client-data execution on a public repository
-        if: ${{ github.event.repository.private == false }}
+      - name: Refuse execution on a public repository
         run: |
-          echo 'AIAppBuilder must be in a private GitHub repository before client requests or persistent runtime state are used.'
+          echo 'AIAppBuilder must be private before client requests or persistent runtime state are used.'
           echo 'Change repository visibility to Private, then run this workflow again.'
           exit 1
 
+  agent:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.private == true }}
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -54,45 +58,53 @@ jobs:
 
       - name: Review request
         if: ${{ inputs.action == 'review' }}
+        env:
+          AIAPPBUILDER_REQUEST: ${{ inputs.request }}
         run: |
           python -m agent.entrypoint \
             --project-id "${{ inputs.project_id }}" \
             --state-root "memory/runtime" \
-            intake "${{ inputs.request }}"
+            intake "$AIAPPBUILDER_REQUEST"
 
       - name: Generate approved Android source
         if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        env:
+          AIAPPBUILDER_REQUEST: ${{ inputs.request }}
         run: |
           python -m agent.entrypoint \
             --project-id "${{ inputs.project_id }}" \
             --state-root "memory/runtime" \
             --work-root "build/agent-work" \
-            intake "${{ inputs.request }}"
+            intake "$AIAPPBUILDER_REQUEST"
           python -m agent.entrypoint \
             --project-id "${{ inputs.project_id }}" \
             --state-root "memory/runtime" \
             --work-root "build/agent-work" \
             generate --approve
 
-      - name: Build generated Android project
-        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Set up Java for Android build
+      - name: Set up Java for Android release cycle
         if: ${{ inputs.action == 'generate' && inputs.approved == true }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Assemble generated debug APK
+      - name: Set up Gradle
         if: ${{ inputs.action == 'generate' && inputs.approved == true }}
-        working-directory: build/agent-work/${{ inputs.project_id }}
-        run: gradle --no-daemon :app:assembleDebug
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
 
-      - name: Upload generated project and APK
+      - name: Run REVIEW BUILD TEST VERIFY FIX-RETRY DELIVERY
+        if: ${{ inputs.action == 'generate' && inputs.approved == true }}
+        run: |
+          python -m agent.entrypoint \
+            --project-id "${{ inputs.project_id }}" \
+            --state-root "memory/runtime" \
+            --work-root "build/agent-work" \
+            release --approve --max-retries 2
+
+      - name: Upload generated project, APK, state and recovery evidence
         if: ${{ inputs.action == 'generate' && inputs.approved == true }}
         uses: actions/upload-artifact@v4
         with:
@@ -103,7 +115,7 @@ jobs:
           if-no-files-found: error
 
       - name: Persist resumable runtime state
-        if: ${{ always() }}
+        if: ${{ always() && github.event.repository.private == true }}
         run: |
           git config user.name 'AIAppBuilder Agent'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
