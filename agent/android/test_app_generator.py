@@ -39,6 +39,21 @@ class AndroidAppGeneratorTests(unittest.TestCase):
             self.assertIn("Double.parseDouble", source)
             self.assertIn("setContentDescription", source)
 
+    def test_performance_preflight_rejects_blocking_source(self) -> None:
+        class BlockingGenerator:
+            def generate(self, project_root, intent):
+                activity = Path(project_root) / "app" / "src" / "main" / "java" / Path(*intent.spec.package_name.split(".")) / "MainActivity.java"
+                activity.parent.mkdir(parents=True, exist_ok=True)
+                activity.write_text("Thread.sleep(5000);", encoding="utf-8")
+                from agent.android.feature_generator import GeneratedAndroidFeatures
+                return GeneratedAndroidFeatures(files=(str(activity.relative_to(project_root)),), family=intent.family)
+
+        plan = self._plan("Create an accessible calculator app that works fully offline.")
+        generator = AndroidAppGenerator(feature_generator=BlockingGenerator())
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(AndroidAppGenerationError):
+                generator.generate(plan, directory, approved=True)
+
     def test_rejects_generation_with_invalid_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(TypeError):
