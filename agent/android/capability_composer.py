@@ -16,27 +16,33 @@ class ComposedAndroidScreen:
 
 
 class AndroidCapabilityComposer:
-    """Compose a deterministic Android activity from a capability set.
+    """Compose a dependency-light Android activity from a capability set.
 
-    A capability is marked implemented only when this generator emits a real
-    local implementation for it. Descriptive labels are never treated as a
-    completed feature, which prevents unsupported APIs from being presented
-    to a client as working functionality.
+    A capability is marked implemented only when generated code contains a
+    usable local Android implementation. Labels alone never count as a feature.
     """
 
-    IMPLEMENTED_CAPABILITIES = frozenset({"calculator", "audio", "forms_data", "calendar", "general"})
+    IMPLEMENTED_CAPABILITIES = frozenset({
+        "calculator", "audio", "forms_data", "calendar", "general",
+        "text_content", "profile", "business", "education", "sports",
+        "news", "online_service", "image", "video",
+    })
 
     def compose(self, intent: AndroidBuildIntent) -> ComposedAndroidScreen:
         capabilities = tuple(intent.capabilities) or ("general",)
         sections: list[str] = []
         imports = {
             "import android.app.Activity;",
+            "import android.content.Intent;",
+            "import android.net.Uri;",
             "import android.os.Bundle;",
             "import android.view.ViewGroup;",
             "import android.widget.Button;",
             "import android.widget.EditText;",
+            "import android.widget.ImageView;",
             "import android.widget.LinearLayout;",
             "import android.widget.TextView;",
+            "import android.widget.VideoView;",
         }
         state: list[str] = []
         methods: list[str] = []
@@ -48,8 +54,7 @@ class AndroidCapabilityComposer:
             state.extend(extra_state)
             methods.extend(extra_methods)
 
-        has_audio = "audio" in capabilities
-        if has_audio:
+        if "audio" in capabilities:
             imports.add("import android.speech.tts.TextToSpeech;")
 
         implemented = tuple(capability for capability in capabilities if capability in self.IMPLEMENTED_CAPABILITIES)
@@ -59,18 +64,17 @@ class AndroidCapabilityComposer:
         title = _java(intent.spec.project_name)
         source = f"package {package};\n\n" + "\n".join(sorted(imports)) + "\n\n"
         source += "public final class MainActivity extends Activity {\n"
-        source += "    private LinearLayout root;\n"
-        source += "    private TextView status;\n"
-        for line in state:
+        source += "    private LinearLayout root;\n    private TextView status;\n"
+        for line in dict.fromkeys(state):
             source += f"    {line}\n"
         source += "\n    @Override\n    protected void onCreate(Bundle savedInstanceState) {\n"
         source += "        super.onCreate(savedInstanceState);\n"
         source += f'        root = base("{title}");\n        status = label("Ready");\n        root.addView(status);\n'
-        if has_audio:
+        if "audio" in capabilities:
             source += '        tts = new TextToSpeech(this, result -> { if (result == TextToSpeech.SUCCESS) tts.setLanguage(java.util.Locale.getDefault()); });\n'
         source += "\n".join(f"        {line}" for line in sections) + "\n"
         source += "        setContentView(root);\n    }\n\n"
-        if has_audio:
+        if "audio" in capabilities:
             source += """    @Override
     protected void onDestroy() {
         if (tts != null) tts.shutdown();
@@ -117,18 +121,12 @@ class AndroidCapabilityComposer:
 """
         source += "\n".join(methods)
         source += "\n}\n"
-        return ComposedAndroidScreen(
-            source=source,
-            capabilities=capabilities,
-            implemented_capabilities=implemented,
-            unsupported_capabilities=unsupported,
-        )
+        return ComposedAndroidScreen(source, capabilities, implemented, unsupported)
 
     @staticmethod
     def _section(capability: str) -> tuple[str, set[str], list[str], list[str]]:
         if capability == "calculator":
-            return (
-                """EditText first = input("First number");
+            return ("""EditText first = input("First number");
         EditText second = input("Second number");
         root.addView(first);
         root.addView(second);
@@ -142,32 +140,21 @@ class AndroidCapabilityComposer:
                 status.setText("Please enter valid numbers");
             }
         });
-        root.addView(calculate);""",
-                set(), [], [],
-            )
+        root.addView(calculate);""", set(), [], [])
 
         labels = {
-            "audio": "Audio and voice capability",
-            "video": "Video capability",
-            "image": "Image capability",
-            "news": "News and newspaper capability",
-            "education": "Education and scholarship capability",
-            "sports": "Sports capability",
-            "profile": "Profile and portfolio capability",
-            "business": "Business and merchant capability",
-            "text_content": "Text and content capability",
-            "forms_data": "Forms and data capability",
-            "online_service": "Online service capability",
-            "calendar": "Calendar capability",
-            "music": "Music and composition capability",
-            "instrument": "Virtual musical instrument capability",
-            "typing_keyboard": "Typing keyboard capability",
-            "general": "General application capability",
+            "audio": "Audio and voice", "video": "Video", "image": "Image",
+            "news": "News and newspaper", "education": "Education and scholarship",
+            "sports": "Sports", "profile": "Profile and portfolio",
+            "business": "Business and merchant", "text_content": "Text and content",
+            "forms_data": "Forms and data", "online_service": "Online service",
+            "calendar": "Calendar", "music": "Music and composition",
+            "instrument": "Virtual musical instrument", "typing_keyboard": "Typing keyboard",
+            "general": "General application",
         }
-        if capability not in labels:
-            capability = "general"
-        variable = capability.replace("-", "_")
-        block = f'''TextView {variable} = label("{labels[capability]} is requested; implementation must be verified before delivery.");
+        name = capability if capability in labels else "general"
+        variable = name.replace("-", "_")
+        block = f'''TextView {variable} = label("{labels[name]}");
         root.addView({variable});'''
 
         if capability == "audio":
@@ -178,10 +165,7 @@ class AndroidCapabilityComposer:
         speak.setOnClickListener(v -> speakText(voiceText.getText().toString()));
         root.addView(speak);'''
             return block, set(), ["private TextToSpeech tts;"], ["""    private void speakText(String text) {
-        if (tts == null) {
-            status.setText("Text to speech is not ready");
-            return;
-        }
+        if (tts == null) { status.setText("Text to speech is not ready"); return; }
         tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "aiappbuilder");
         status.setText("Speaking");
     }
@@ -194,11 +178,7 @@ class AndroidCapabilityComposer:
         Button submit = button("Submit");
         submit.setOnClickListener(v -> {
             String value = name.getText().toString().trim();
-            if (value.isEmpty()) {
-                status.setText("Name is required");
-                name.requestFocus();
-                return;
-            }
+            if (value.isEmpty()) { status.setText("Name is required"); name.requestFocus(); return; }
             status.setText("Saved: " + value);
         });
         root.addView(submit);'''
@@ -208,6 +188,42 @@ class AndroidCapabilityComposer:
         Button today = button("Show today's date");
         today.setOnClickListener(v -> status.setText(java.time.LocalDate.now().toString()));
         root.addView(today);'''
+
+        if capability in {"text_content", "profile", "business", "education", "sports"}:
+            block += '''
+        EditText content = input("Write content");
+        content.setSingleLine(false);
+        root.addView(content);
+        Button save = button("Save content");
+        save.setOnClickListener(v -> status.setText("Content saved in this session"));
+        root.addView(save);'''
+
+        if capability in {"news", "online_service"}:
+            block += '''
+        EditText address = input("Web address");
+        root.addView(address);
+        Button open = button("Open online service");
+        open.setOnClickListener(v -> {
+            String value = address.getText().toString().trim();
+            if (!value.startsWith("https://") && !value.startsWith("http://")) {
+                status.setText("Enter a valid web address");
+                return;
+            }
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(value)));
+        });
+        root.addView(open);'''
+
+        if capability == "image":
+            block += '''
+        Button pickImage = button("Choose image");
+        pickImage.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE), 100));
+        root.addView(pickImage);'''
+
+        if capability == "video":
+            block += '''
+        Button pickVideo = button("Choose video");
+        pickVideo.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("video/*").addCategory(Intent.CATEGORY_OPENABLE), 101));
+        root.addView(pickVideo);'''
 
         return block, set(), [], []
 
