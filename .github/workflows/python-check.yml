@@ -20,6 +20,9 @@ jobs:
         run: python -m compileall -q agent memory
       - name: Run lightweight import checks
         run: python - <<'PY'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from agent.pipeline import AgentPipeline
 from agent.generation import GenerationEngine, GenerationManifest
 from agent.review import ReviewEngine
@@ -27,6 +30,8 @@ from agent.verification import VerificationExecutor
 from agent.build import BuildEngine
 from agent.test import TestEngine
 from agent.delivery import DeliveryEngine, DeliveryGate
+from agent.android import AndroidProjectGenerator
+from agent.templates.android_template import AndroidProjectSpec
 
 result = AgentPipeline().intake('Create an accessible offline and online Android app')
 assert result.plan.build_required
@@ -37,5 +42,13 @@ assert VerificationExecutor() is not None
 assert BuildEngine() is not None
 assert TestEngine() is not None
 assert DeliveryEngine().prepare(DeliveryGate()).status == 'BLOCKED'
-print('AIAppBuilder core imports and gates OK')
+
+with TemporaryDirectory() as temp:
+    spec = AndroidProjectSpec('CI Accessible App', 'com.example.ciapp', mode='hybrid')
+    generated = AndroidProjectGenerator().generate(Path(temp) / 'app', spec)
+    assert (generated.root / 'settings.gradle').is_file()
+    assert (generated.root / 'app/build.gradle').is_file()
+    assert (generated.root / 'app/src/main/AndroidManifest.xml').is_file()
+
+print('AIAppBuilder core imports, gates, and Android generation smoke test OK')
 PY
