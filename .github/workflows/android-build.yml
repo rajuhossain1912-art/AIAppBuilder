@@ -22,7 +22,7 @@ jobs:
         run: python -m unittest agent.orchestrator.test_release_cycle -v
 
       - name: Run requirement capability tests
-        run: python -m unittest agent.requirements.test_capability_catalog -v
+        run: python -m unittest discover -s agent/requirements -p 'test_*.py' -v
 
       - name: Generate feature-complete CI app through pipeline
         run: |
