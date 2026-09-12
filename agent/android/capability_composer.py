@@ -25,7 +25,7 @@ class AndroidCapabilityComposer:
     IMPLEMENTED_CAPABILITIES = frozenset({
         "calculator", "audio", "forms_data", "calendar", "general",
         "text_content", "profile", "business", "education", "sports",
-        "news", "online_service", "image", "video",
+        "news", "online_service", "image", "video", "music", "instrument",
     })
 
     def compose(self, intent: AndroidBuildIntent) -> ComposedAndroidScreen:
@@ -56,6 +56,10 @@ class AndroidCapabilityComposer:
 
         if "audio" in capabilities:
             imports.add("import android.speech.tts.TextToSpeech;")
+        if "music" in capabilities or "instrument" in capabilities:
+            imports.add("import android.media.AudioFormat;")
+            imports.add("import android.media.AudioManager;")
+            imports.add("import android.media.AudioTrack;")
 
         implemented = tuple(capability for capability in capabilities if capability in self.IMPLEMENTED_CAPABILITIES)
         unsupported = tuple(capability for capability in capabilities if capability not in self.IMPLEMENTED_CAPABILITIES)
@@ -119,7 +123,7 @@ class AndroidCapabilityComposer:
     }
 
 """
-        source += "\n".join(methods)
+        source += "\n".join(dict.fromkeys(methods))
         source += "\n}\n"
         return ComposedAndroidScreen(source, capabilities, implemented, unsupported)
 
@@ -224,6 +228,43 @@ class AndroidCapabilityComposer:
         Button pickVideo = button("Choose video");
         pickVideo.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("video/*").addCategory(Intent.CATEGORY_OPENABLE), 101));
         root.addView(pickVideo);'''
+
+        if capability in {"music", "instrument"}:
+            block += '''
+        TextView noteHelp = label("Playable tone instrument. Each button produces a synthesized note.");
+        root.addView(noteHelp);
+        LinearLayout notes = new LinearLayout(this);
+        notes.setOrientation(LinearLayout.VERTICAL);
+        String[] names = {"C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"};
+        double[] frequencies = {261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25};
+        for (int i = 0; i < names.length; i++) {
+            final double frequency = frequencies[i];
+            Button note = button(names[i]);
+            note.setOnClickListener(v -> playTone(frequency, 260));
+            notes.addView(note);
+        }
+        root.addView(notes);'''
+            return block, set(), [], ["""    private void playTone(double frequency, int durationMs) {
+        final int sampleRate = 44100;
+        final int sampleCount = (int) (sampleRate * durationMs / 1000.0);
+        final short[] samples = new short[sampleCount];
+        for (int i = 0; i < sampleCount; i++) {
+            double envelope = Math.min(1.0, Math.min(i / 500.0, (sampleCount - i) / 500.0));
+            samples[i] = (short) (Math.sin(2.0 * Math.PI * frequency * i / sampleRate) * 12000 * envelope);
+        }
+        AudioTrack track = new AudioTrack(AudioManager.STREAM_MUSIC, sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                samples.length * 2, AudioTrack.MODE_STATIC);
+        track.write(samples, 0, samples.length);
+        track.setNotificationMarkerPosition(sampleCount);
+        track.setPlaybackPositionUpdateListener(new AudioTrack.OnPlaybackPositionUpdateListener() {
+            @Override public void onMarkerReached(AudioTrack audioTrack) { audioTrack.release(); }
+            @Override public void onPeriodicNotification(AudioTrack audioTrack) { }
+        });
+        track.play();
+        status.setText("Playing tone " + frequency + " Hz");
+    }
+"""]
 
         return block, set(), [], []
 
