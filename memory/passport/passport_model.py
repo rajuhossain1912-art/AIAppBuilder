@@ -9,6 +9,33 @@ class ProjectPassportError(ValueError):
     """Base error for invalid project passport data."""
 
 
+ALLOWED_LIFECYCLE_STATES = {
+    "RECEIVED",
+    "UNDERSTANDING",
+    "AWAITING_CONFIRMATION",
+    "PLANNING",
+    "RESEARCHING",
+    "GENERATING",
+    "REVIEWING",
+    "BUILDING",
+    "TESTING",
+    "FIXING",
+    "VERIFYING",
+    "DELIVERING",
+    "COMPLETED",
+}
+
+ALLOWED_PROJECT_STATUSES = {
+    "ACTIVE",
+    "BLOCKED",
+    "PAUSED",
+    "COMPLETED",
+    "FAILED",
+    "ARCHIVED",
+    "RECOVERING",
+}
+
+
 @dataclass
 class ProjectPassport:
     """Authoritative identity and metadata record for one project."""
@@ -24,6 +51,7 @@ class ProjectPassport:
     current_project_version: str = "0.1.0"
     repository_reference: Optional[str] = None
     project_status: str = "ACTIVE"
+    schema_version: int = 1
 
     requirements: list[str] = field(default_factory=list)
     approvals: list[str] = field(default_factory=list)
@@ -45,17 +73,45 @@ class ProjectPassport:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.project_id.strip():
+        if not isinstance(self.project_id, str) or not self.project_id.strip():
             raise ProjectPassportError("project_id is required")
 
-        if not self.project_name.strip():
+        if not isinstance(self.project_name, str) or not self.project_name.strip():
             raise ProjectPassportError("project_name is required")
+
+        self.project_id = self.project_id.strip()
+        self.project_name = self.project_name.strip()
+
+        if not isinstance(self.schema_version, int) or isinstance(self.schema_version, bool):
+            raise ProjectPassportError("schema_version must be an integer")
+        if self.schema_version < 1:
+            raise ProjectPassportError("schema_version must be at least 1")
+
+        if self.current_lifecycle_state not in ALLOWED_LIFECYCLE_STATES:
+            raise ProjectPassportError(
+                f"Invalid lifecycle state: {self.current_lifecycle_state}"
+            )
+
+        if self.project_status not in ALLOWED_PROJECT_STATUSES:
+            raise ProjectPassportError(
+                f"Invalid project status: {self.project_status}"
+            )
 
         if not self.creation_date:
             self.creation_date = self._now()
 
         if not self.last_updated_date:
             self.last_updated_date = self.creation_date
+
+        for field_name in (
+            "creation_date",
+            "last_updated_date",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ProjectPassportError(
+                    f"{field_name} must be a non-empty string"
+                )
 
     @staticmethod
     def _now() -> str:
@@ -114,14 +170,18 @@ class ProjectPassport:
         self._add_unique(self.important_decisions, decision)
 
     def set_lifecycle_state(self, state: str) -> None:
-        if not state.strip():
+        if not isinstance(state, str) or not state.strip():
             raise ProjectPassportError("lifecycle state cannot be empty")
+        if state not in ALLOWED_LIFECYCLE_STATES:
+            raise ProjectPassportError(f"Invalid lifecycle state: {state}")
         self.current_lifecycle_state = state
         self.touch()
 
     def set_project_status(self, status: str) -> None:
-        if not status.strip():
+        if not isinstance(status, str) or not status.strip():
             raise ProjectPassportError("project status cannot be empty")
+        if status not in ALLOWED_PROJECT_STATUSES:
+            raise ProjectPassportError(f"Invalid project status: {status}")
         self.project_status = status
         self.touch()
 
@@ -135,12 +195,16 @@ class ProjectPassport:
         if not isinstance(data, dict):
             raise ProjectPassportError("passport data must be a dictionary")
 
-        return cls(**data)
+        normalized = dict(data)
+        normalized.setdefault("schema_version", 1)
+        return cls(**normalized)
 
     @staticmethod
     def _add_unique(items: list[str], value: str) -> None:
-        value = value.strip()
+        if not isinstance(value, str):
+            raise ProjectPassportError("record value must be a string")
 
+        value = value.strip()
         if not value:
             raise ProjectPassportError("record value cannot be empty")
 
