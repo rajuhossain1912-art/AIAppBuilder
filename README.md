@@ -12,6 +12,26 @@ The intended client workflow is:
 
 The agent must ask for missing information instead of inventing important requirements. It must not claim an app is complete merely because source code was generated.
 
+## Phone-friendly agent entrypoint
+
+The repository now contains a real user-facing execution entrypoint at `agent/entrypoint.py` and a GitHub Actions workflow at `.github/workflows/agent-run.yml`.
+
+The intended phone-only workflow is:
+
+1. Open the repository's **Actions** tab.
+2. Run **AIAppBuilder Agent Run** with `action = review` and the client's request.
+3. Read the generated requirement review and clarification questions.
+4. Resolve any questions and run the workflow again with the updated request.
+5. After reviewing the final requirements, run with `action = generate` and `approved = true`.
+6. The agent generates the Android project, runs the approved-generation gates, builds the debug APK in GitHub Actions, and uploads the generated project/APK as workflow artifacts.
+7. Runtime state is persisted under `memory/runtime/<project_id>/` so a later run can resume from repository state rather than depending on a previous chat.
+
+### Important privacy requirement
+
+The repository **must be Private before real client requirements are entered**. The agent workflow deliberately refuses to process client data when the repository is public. This prevents client requests and persistent runtime state from being exposed through a public repository.
+
+The current repository visibility should therefore be changed to **Private** before real client work begins.
+
 ## Client Order Intake
 
 A client may describe an app in Bangla, Banglish, English, mixed language, or informal wording. The agent should:
