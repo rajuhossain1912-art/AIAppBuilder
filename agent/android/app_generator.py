@@ -8,6 +8,7 @@ from agent.android.feature_generator import AndroidFeatureGenerator, GeneratedAn
 from agent.android.project_generator import AndroidProjectGenerator, GeneratedAndroidProject
 from agent.planning import ProjectPlan
 from agent.quality import PerformancePolicy
+from agent.verification import AndroidAccessibilityVerifier, VerificationStatus
 
 
 class AndroidAppGenerationError(ValueError):
@@ -22,7 +23,7 @@ class GeneratedAndroidApp:
 
 
 class AndroidAppGenerator:
-    """Connect planning, approval, generation and pre-build quality gates."""
+    """Connect planning, approval and mandatory pre-build quality gates."""
 
     def __init__(
         self,
@@ -30,11 +31,13 @@ class AndroidAppGenerator:
         project_generator: AndroidProjectGenerator | None = None,
         feature_generator: AndroidFeatureGenerator | None = None,
         performance_policy: PerformancePolicy | None = None,
+        accessibility_verifier: AndroidAccessibilityVerifier | None = None,
     ) -> None:
         self.intent_builder = intent_builder or AndroidBuildIntentBuilder()
         self.project_generator = project_generator or AndroidProjectGenerator()
         self.feature_generator = feature_generator or AndroidFeatureGenerator()
         self.performance_policy = performance_policy or PerformancePolicy()
+        self.accessibility_verifier = accessibility_verifier or AndroidAccessibilityVerifier()
 
     def generate(
         self,
@@ -63,5 +66,33 @@ class AndroidAppGenerator:
                 raise AndroidAppGenerationError(
                     f"Generated app failed performance preflight: {exc}"
                 ) from exc
+
+        source_paths = [project.root / relative for relative in features.files]
+        java_sources = [path for path in source_paths if path.suffix == ".java"]
+        if not java_sources:
+            raise AndroidAppGenerationError(
+                "Generated Android app has no Java source available for mandatory accessibility verification."
+            )
+
+        accessibility_reports = [
+            self.accessibility_verifier.verify_source(
+                project_id=intent.spec.package_name,
+                source_path=source_path,
+                required=True,
+            )
+            for source_path in java_sources
+        ]
+        failed = [report for report in accessibility_reports if report.final_status != VerificationStatus.VERIFIED]
+        if failed:
+            details = "; ".join(
+                evidence.detail
+                for report in failed
+                for evidence in report.evidence
+                if evidence.status in {VerificationStatus.FAILED, VerificationStatus.BLOCKED}
+            )
+            raise AndroidAppGenerationError(
+                "Generated Android app failed the mandatory global accessibility gate. "
+                + (details or "Accessibility evidence is insufficient.")
+            )
 
         return GeneratedAndroidApp(intent=intent, project=project, features=features)
