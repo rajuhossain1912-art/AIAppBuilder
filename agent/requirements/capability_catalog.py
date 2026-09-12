@@ -24,6 +24,7 @@ _CAPABILITIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("audio", "Audio and voice", ("audio", "voice", "podcast", "sound", "tts", "text to speech", "voice maker", "voice studio")),
     ("audio_editor", "Accessible audio editing", ("audio editor", "audio editing", "sound editor", "accessible audio editor", "অডিও এডিটর", "অডিও এডিটিং")),
     ("video_editor", "Accessible video editing", ("video editor", "video editing", "accessible video editor", "ভিডিও এডিটর", "ভিডিও এডিটিং")),
+    ("image_editor", "Image editing", ("image editor", "image editing", "photo editor", "photo editing", "picture editor", "ছবি এডিটর", "ছবি এডিটিং", "ইমেজ এডিটর")),
     ("accessibility_utility", "Accessibility and screen-reader utilities", ("accessibility utility", "accessibility tool", "screen reader", "talkback utility", "accessibility service", "অ্যাক্সেসিবিলিটি", "স্ক্রিন রিডার")),
     ("text_content", "Text and content generation", ("text generation", "content", "writing", "article generator", "script", "caption")),
     ("business", "Business and merchant", ("business", "merchant", "shop", "store", "inventory", "product catalog", "customer", "order")),
