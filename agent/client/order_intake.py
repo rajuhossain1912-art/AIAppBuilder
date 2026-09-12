@@ -39,7 +39,14 @@ class ClientOrderIntake:
                 "What is the app's main purpose and the most important task users must be able to complete?"
             )
 
-        if any(token in text for token in ("youtube", "facebook", "video", "channel", "page")):
+        # A local video editor does not need a publishing channel or content source.
+        # Ask for a source only when the request is actually about consuming or
+        # publishing channel/page content.
+        channel_context = any(
+            token in text
+            for token in ("youtube", "facebook page", "video channel", "content source", "publisher", "publish")
+        )
+        if channel_context:
             questions.append(
                 "Which channel, page, or content source should the app use, and what public links or identifiers should be connected?"
             )
