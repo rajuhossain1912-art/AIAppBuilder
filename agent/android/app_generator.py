@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 
 from agent.android.app_spec_builder import AndroidBuildIntent, AndroidBuildIntentBuilder
 from agent.android.feature_generator import AndroidFeatureGenerator, GeneratedAndroidFeatures
@@ -112,5 +113,26 @@ class AndroidAppGenerator:
                 "Generated Android app failed the approved-requirements gate. "
                 + (reasons or "Required capabilities are not fully implemented.")
             )
+
+        evidence_path = project.root / "requirements_verification.json"
+        evidence_path.write_text(
+            json.dumps(
+                {
+                    "status": requirements.status,
+                    "required_capabilities": list(requirements.required_capabilities),
+                    "generated_capabilities": list(requirements.generated_capabilities),
+                    "implemented_capabilities": list(requirements.implemented_capabilities),
+                    "unsupported_capabilities": list(requirements.unsupported_capabilities),
+                    "missing_capabilities": list(requirements.missing_capabilities),
+                    "missing_files": list(requirements.missing_files),
+                    "unresolved_questions": list(requirements.unresolved_questions),
+                    "reasons": list(requirements.reasons),
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
 
         return GeneratedAndroidApp(intent=intent, project=project, features=features)
