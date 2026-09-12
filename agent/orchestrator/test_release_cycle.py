@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,20 @@ class ReleaseCycleTests(unittest.TestCase):
         source.write_text(
             'import android.widget.Button;\n'
             'class Main { Button button; void label() { button.setContentDescription("Action"); } }\n',
+            encoding="utf-8",
+        )
+        (root / "requirements_verification.json").write_text(
+            json.dumps({
+                "status": "VERIFIED",
+                "required_capabilities": ["general"],
+                "generated_capabilities": ["general"],
+                "implemented_capabilities": ["general"],
+                "unsupported_capabilities": [],
+                "missing_capabilities": [],
+                "missing_files": [],
+                "unresolved_questions": [],
+                "reasons": [],
+            }),
             encoding="utf-8",
         )
 
@@ -72,6 +87,39 @@ class ReleaseCycleTests(unittest.TestCase):
             self.assertTrue(result.delivery.manifest)
             self.assertEqual(runner.orchestrator.current_state, LifecycleState.COMPLETED)
             self.assertEqual(result.retries, 0)
+
+    def test_release_is_blocked_without_verified_requirements_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._android_fixture(root)
+            (root / "requirements_verification.json").unlink()
+            artifact = root / "app-debug.apk"
+            build = [
+                "python",
+                "-c",
+                "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
+            ]
+            test = [
+                "python",
+                "-c",
+                "from pathlib import Path; assert Path('app/src/main/Main.java').is_file()",
+            ]
+            runner = PipelineOrchestrator("release-test", root / "state.json")
+            runner.orchestrator.start()
+            runner.orchestrator.transition_to(LifecycleState.UNDERSTANDING)
+            runner.orchestrator.transition_to(LifecycleState.PLANNING)
+            runner.orchestrator.transition_to(LifecycleState.GENERATING)
+            runner.orchestrator.transition_to(LifecycleState.REVIEWING)
+            with self.assertRaises(RuntimeError):
+                runner.execute_release_cycle(
+                    project_root=root,
+                    review_paths=["app/src/main/Main.java"],
+                    build_command=build,
+                    test_command=test,
+                    artifact_path=artifact,
+                    authorized=True,
+                    max_retries=0,
+                )
 
 
 if __name__ == "__main__":
