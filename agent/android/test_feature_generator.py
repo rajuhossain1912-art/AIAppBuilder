@@ -65,6 +65,22 @@ class AndroidFeatureGeneratorTests(unittest.TestCase):
         self.assertIn("Text and content capability", source)
         self.assertIn("Online service capability", source)
 
+    def test_music_and_instrument_generate_real_tone_controls(self):
+        request = "Create an accessible music app with guitar, harmonium, tabla, piano and notes."
+        intent = self._intent(request)
+        expected = {"music", "instrument"}
+        self.assertTrue(expected.issubset(set(intent.capabilities)))
+        with tempfile.TemporaryDirectory() as tmp:
+            self.project_generator.generate(tmp, intent.spec)
+            result = self.generator.generate(tmp, intent)
+            source = Path(tmp, result.files[0]).read_text(encoding="utf-8")
+        self.assertTrue(expected.issubset(set(result.capabilities)))
+        self.assertTrue(expected.issubset(set(result.implemented_capabilities)))
+        self.assertIn("AudioTrack", source)
+        self.assertIn("playTone", source)
+        self.assertIn("C4", source)
+        self.assertIn("setContentDescription", source)
+
     def test_requires_existing_generated_project(self):
         intent = self._intent("Create a calculator app.")
         with tempfile.TemporaryDirectory() as tmp:
