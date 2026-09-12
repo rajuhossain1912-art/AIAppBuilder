@@ -42,6 +42,17 @@ _SECRET_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
 )
 
+_PLACEHOLDER_MARKERS = (
+    "requires an approved endpoint",
+    "endpoint was invented",
+    "requested features must be specified",
+    "project shell ready",
+    "ready for verified project-specific content",
+    "implementation requires",
+    "not implemented",
+    "placeholder",
+)
+
 
 class ReviewEngine:
     """Performs conservative static review; runtime claims require evidence."""
@@ -66,6 +77,7 @@ class ReviewEngine:
                     status=ReviewStatus.BLOCKED, path=str(relative),
                 ))
                 continue
+            lowered = text.casefold()
             for pattern in _SECRET_PATTERNS:
                 if pattern.search(text):
                     report.findings.append(ReviewFinding(
@@ -73,6 +85,16 @@ class ReviewEngine:
                         category="SECURITY", severity="CRITICAL",
                         message="Possible hard-coded credential detected; value intentionally omitted.",
                         status=ReviewStatus.BLOCKED, path=str(relative),
+                    ))
+                    break
+            for marker in _PLACEHOLDER_MARKERS:
+                if marker in lowered:
+                    report.findings.append(ReviewFinding(
+                        finding_id=f"REVIEW-{len(report.findings)+1:03d}",
+                        category="FUNCTIONALITY", severity="HIGH",
+                        message=f"Known placeholder marker remains: {marker}",
+                        status=ReviewStatus.PARTIALLY_IMPLEMENTED,
+                        path=str(relative),
                     ))
                     break
         return report
