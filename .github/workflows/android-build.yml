@@ -21,6 +21,9 @@ jobs:
       - name: Run lifecycle release-cycle tests
         run: python -m unittest agent.orchestrator.test_release_cycle -v
 
+      - name: Run requirement capability tests
+        run: python -m unittest agent.requirements.test_capability_catalog -v
+
       - name: Generate feature-complete CI app through pipeline
         run: |
           python - <<'PY'
