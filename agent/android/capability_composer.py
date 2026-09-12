@@ -26,6 +26,7 @@ class AndroidCapabilityComposer:
         "calculator", "audio", "forms_data", "calendar", "general",
         "text_content", "profile", "business", "education", "sports",
         "news", "online_service", "image", "video", "music", "instrument",
+        "typing_keyboard",
     })
 
     def compose(self, intent: AndroidBuildIntent) -> ComposedAndroidScreen:
@@ -39,10 +40,8 @@ class AndroidCapabilityComposer:
             "import android.view.ViewGroup;",
             "import android.widget.Button;",
             "import android.widget.EditText;",
-            "import android.widget.ImageView;",
             "import android.widget.LinearLayout;",
             "import android.widget.TextView;",
-            "import android.widget.VideoView;",
         }
         state: list[str] = []
         methods: list[str] = []
@@ -120,6 +119,18 @@ class AndroidCapabilityComposer:
         action.setContentDescription(text);
         action.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return action;
+    }
+
+    private Button keyButton(String label, EditText target) {
+        Button key = button(label);
+        key.setOnClickListener(v -> {
+            int start = Math.max(0, target.getSelectionStart());
+            int end = Math.max(start, target.getSelectionEnd());
+            target.getText().replace(start, end, label);
+            target.requestFocus();
+            status.setText("Inserted " + label);
+        });
+        return key;
     }
 
 """
@@ -230,6 +241,47 @@ class AndroidCapabilityComposer:
         Button pickVideo = button("Choose video");
         pickVideo.setOnClickListener(v -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("video/*").addCategory(Intent.CATEGORY_OPENABLE), 101));
         root.addView(pickVideo);'''
+
+        if capability == "typing_keyboard":
+            block += '''
+        EditText typingTarget = input("Type here");
+        typingTarget.setSingleLine(false);
+        root.addView(typingTarget);
+        LinearLayout englishKeys = new LinearLayout(this);
+        englishKeys.setOrientation(LinearLayout.VERTICAL);
+        String[] englishRows = {"Q W E R T Y U I O P", "A S D F G H J K L", "Z X C V B N M"};
+        for (String rowText : englishRows) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            for (String keyLabel : rowText.split(" ")) {
+                row.addView(keyButton(keyLabel, typingTarget));
+            }
+            englishKeys.addView(row);
+        }
+        root.addView(englishKeys);
+        LinearLayout banglaKeys = new LinearLayout(this);
+        banglaKeys.setOrientation(LinearLayout.HORIZONTAL);
+        String[] banglaLabels = {"অ", "আ", "ই", "উ", "এ", "ও", "ক", "খ", "গ", "ম", "য", "র"};
+        for (String keyLabel : banglaLabels) {
+            banglaKeys.addView(keyButton(keyLabel, typingTarget));
+        }
+        root.addView(banglaKeys);
+        Button spaceKey = keyButton(" ", typingTarget);
+        spaceKey.setContentDescription("Space");
+        root.addView(spaceKey);
+        Button backspaceKey = button("Backspace");
+        backspaceKey.setOnClickListener(v -> {
+            int start = typingTarget.getSelectionStart();
+            int end = typingTarget.getSelectionEnd();
+            if (start > 0 && start == end) {
+                typingTarget.getText().delete(start - 1, start);
+            } else if (start != end) {
+                typingTarget.getText().delete(Math.min(start, end), Math.max(start, end));
+            }
+            typingTarget.requestFocus();
+            status.setText("Backspace");
+        });
+        root.addView(backspaceKey);'''
 
         if capability in {"music", "instrument"}:
             suffix = capability.replace("_", "")
