@@ -21,7 +21,11 @@ class ReleaseCycleTests(unittest.TestCase):
                 "-c",
                 "from pathlib import Path; Path('app-debug.apk').write_bytes(b'ci-artifact')",
             ]
-            test = ["python", "-c", "assert Path('Main.java').is_file()"]
+            test = [
+                "python",
+                "-c",
+                "from pathlib import Path; assert Path('Main.java').is_file()",
+            ]
 
             state = root / "state.json"
             runner = PipelineOrchestrator("release-test", state)
