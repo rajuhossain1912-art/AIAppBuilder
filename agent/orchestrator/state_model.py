@@ -45,16 +45,12 @@ class OrchestratorState:
 
 
 ALLOWED_TRANSITIONS: dict[LifecycleState, set[LifecycleState]] = {
-    LifecycleState.RECEIVED: {
-        LifecycleState.UNDERSTANDING,
-    },
+    LifecycleState.RECEIVED: {LifecycleState.UNDERSTANDING},
     LifecycleState.UNDERSTANDING: {
         LifecycleState.AWAITING_CONFIRMATION,
         LifecycleState.PLANNING,
     },
-    LifecycleState.AWAITING_CONFIRMATION: {
-        LifecycleState.PLANNING,
-    },
+    LifecycleState.AWAITING_CONFIRMATION: {LifecycleState.PLANNING},
     LifecycleState.PLANNING: {
         LifecycleState.RESEARCHING,
         LifecycleState.GENERATING,
@@ -63,9 +59,7 @@ ALLOWED_TRANSITIONS: dict[LifecycleState, set[LifecycleState]] = {
         LifecycleState.GENERATING,
         LifecycleState.PLANNING,
     },
-    LifecycleState.GENERATING: {
-        LifecycleState.REVIEWING,
-    },
+    LifecycleState.GENERATING: {LifecycleState.REVIEWING},
     LifecycleState.REVIEWING: {
         LifecycleState.BUILDING,
         LifecycleState.FIXING,
@@ -87,9 +81,7 @@ ALLOWED_TRANSITIONS: dict[LifecycleState, set[LifecycleState]] = {
         LifecycleState.DELIVERING,
         LifecycleState.FIXING,
     },
-    LifecycleState.DELIVERING: {
-        LifecycleState.COMPLETED,
-    },
+    LifecycleState.DELIVERING: {LifecycleState.COMPLETED},
     LifecycleState.COMPLETED: set(),
 }
 
@@ -98,7 +90,7 @@ class OrchestratorStateManager:
     """Controls valid lifecycle transitions for one project."""
 
     def __init__(self, project_id: str) -> None:
-        if not project_id or not project_id.strip():
+        if not isinstance(project_id, str) or not project_id.strip():
             raise ValueError("project_id must not be empty")
 
         self.state = OrchestratorState(project_id=project_id.strip())
@@ -108,9 +100,14 @@ class OrchestratorStateManager:
         return self.state.current_state
 
     def can_transition_to(self, target: LifecycleState) -> bool:
+        if not isinstance(target, LifecycleState):
+            return False
         return target in ALLOWED_TRANSITIONS[self.state.current_state]
 
     def transition_to(self, target: LifecycleState) -> OrchestratorState:
+        if not isinstance(target, LifecycleState):
+            raise StateTransitionError("target must be a valid LifecycleState")
+
         if not self.can_transition_to(target):
             raise StateTransitionError(
                 f"Invalid lifecycle transition: "
@@ -120,11 +117,10 @@ class OrchestratorStateManager:
         self.state.previous_state = self.state.current_state
         self.state.current_state = target
         self.state.timestamp = datetime.now(timezone.utc).isoformat()
-
         return self.state
 
     def add_error(self, error: str) -> None:
-        if error and error.strip():
+        if isinstance(error, str) and error.strip():
             self.state.errors.append(error.strip())
 
     def increment_retry(self) -> int:
@@ -135,33 +131,48 @@ class OrchestratorStateManager:
         self.state.retry_count = 0
 
     def add_required_approval(self, approval: str) -> None:
-        if approval and approval not in self.state.required_approvals:
-            self.state.required_approvals.append(approval)
+        if isinstance(approval, str) and approval.strip():
+            approval = approval.strip()
+            if approval not in self.state.required_approvals:
+                self.state.required_approvals.append(approval)
 
     def add_received_approval(self, approval: str) -> None:
-        if approval and approval not in self.state.received_approvals:
-            self.state.received_approvals.append(approval)
+        if isinstance(approval, str) and approval.strip():
+            approval = approval.strip()
+            if approval not in self.state.received_approvals:
+                self.state.received_approvals.append(approval)
 
     def mark_success(self, operation: str) -> None:
-        self.state.last_successful_operation = operation
+        if not isinstance(operation, str) or not operation.strip():
+            raise ValueError("operation must not be empty")
+        self.state.last_successful_operation = operation.strip()
 
     def mark_verified(self, result: str) -> None:
-        self.state.last_verified_result = result
+        if not isinstance(result, str) or not result.strip():
+            raise ValueError("result must not be empty")
+        self.state.last_verified_result = result.strip()
 
     def set_current_task(self, task: Optional[str]) -> None:
-        self.state.current_task = task
+        if task is not None and not isinstance(task, str):
+            raise ValueError("task must be a string or None")
+        self.state.current_task = task.strip() if task else None
 
     def add_completed_task(self, task: str) -> None:
-        if task and task not in self.state.completed_tasks:
-            self.state.completed_tasks.append(task)
+        self._add_unique_task(self.state.completed_tasks, task)
 
     def add_pending_task(self, task: str) -> None:
-        if task and task not in self.state.pending_tasks:
-            self.state.pending_tasks.append(task)
+        self._add_unique_task(self.state.pending_tasks, task)
 
     def add_blocked_task(self, task: str) -> None:
-        if task and task not in self.state.blocked_tasks:
-            self.state.blocked_tasks.append(task)
+        self._add_unique_task(self.state.blocked_tasks, task)
+
+    @staticmethod
+    def _add_unique_task(items: list[str], task: str) -> None:
+        if not isinstance(task, str) or not task.strip():
+            raise ValueError("task must not be empty")
+        task = task.strip()
+        if task not in items:
+            items.append(task)
 
     def snapshot(self) -> dict:
         return {
@@ -183,4 +194,4 @@ class OrchestratorStateManager:
             "received_approvals": list(self.state.received_approvals),
             "last_successful_operation": self.state.last_successful_operation,
             "last_verified_result": self.state.last_verified_result,
-  }
+        }
