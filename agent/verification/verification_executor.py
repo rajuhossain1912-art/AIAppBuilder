@@ -39,6 +39,11 @@ class VerificationReport:
             return VerificationStatus.VERIFIED
         return VerificationStatus.NOT_VERIFIED
 
+    @property
+    def passed(self) -> bool:
+        """Backward-compatible boolean view of a fully verified report."""
+        return self.final_status == VerificationStatus.VERIFIED
+
 
 class VerificationExecutor:
     """Collects factual local evidence without upgrading static checks to runtime proof."""
