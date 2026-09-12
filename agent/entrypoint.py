@@ -3,11 +3,22 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 
 from agent.orchestrator import OrchestratedIntake, PipelineOrchestrator
 
 DEFAULT_STATE_ROOT = Path("memory/runtime")
 DEFAULT_WORK_ROOT = Path(".agent-work")
+_PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def _validate_project_id(project_id: str) -> str:
+    """Reject path traversal and ambiguous project identifiers before filesystem use."""
+    if not isinstance(project_id, str) or not _PROJECT_ID_RE.fullmatch(project_id):
+        raise ValueError(
+            "project_id must be 1-64 characters and contain only letters, numbers, hyphen, or underscore"
+        )
+    return project_id
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -30,9 +41,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _agent(args: argparse.Namespace) -> tuple[PipelineOrchestrator, Path]:
-    state_dir = Path(args.state_root) / args.project_id
+    project_id = _validate_project_id(args.project_id)
+    state_root = Path(args.state_root).resolve()
+    work_root = Path(args.work_root).resolve()
+    state_dir = state_root / project_id
+    work_dir = work_root / project_id
     state_dir.mkdir(parents=True, exist_ok=True)
-    return PipelineOrchestrator(args.project_id, state_dir / "orchestrator_state.json"), state_dir
+    work_dir.mkdir(parents=True, exist_ok=True)
+    return PipelineOrchestrator(project_id, state_dir / "orchestrator_state.json"), state_dir
 
 
 def _print_intake(result) -> None:
@@ -66,7 +82,11 @@ def _review_paths(project_root: Path) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    agent, state_dir = _agent(args)
+    try:
+        agent, state_dir = _agent(args)
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        return 2
 
     if args.command == "status":
         agent.orchestrator.start()
@@ -104,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_intake(OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator))
             return 2
         result = OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator)
-        output_root = Path(args.work_root) / args.project_id
+        output_root = Path(args.work_root).resolve() / args.project_id
         output_root.mkdir(parents=True, exist_ok=True)
         generated = agent.approve_and_generate(result, output_root)
         print(json.dumps({
@@ -122,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: --max-retries must be between 0 and 5.")
             return 2
         agent.orchestrator.start()
-        project_root = (Path(args.work_root) / args.project_id).resolve()
+        project_root = (Path(args.work_root).resolve() / args.project_id).resolve()
         artifact = project_root / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
         if not project_root.is_dir():
             print("ERROR: generated project does not exist. Run 'generate --approve' first.")
