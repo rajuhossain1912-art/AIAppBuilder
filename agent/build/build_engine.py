@@ -6,6 +6,10 @@ import subprocess
 from typing import Sequence
 
 
+class BuildError(ValueError):
+    """Raised when a build request is unsafe or invalid."""
+
+
 @dataclass
 class BuildResult:
     success: bool
@@ -17,16 +21,16 @@ class BuildResult:
 
 
 class BuildEngine:
-    """Runs only explicitly supplied build commands inside an authorized project directory."""
+    """Runs an explicitly approved build command inside an authorized project directory."""
 
     def run(self, project_root: str | Path, command: Sequence[str], timeout_seconds: int = 900) -> BuildResult:
         root = Path(project_root).resolve()
         if not root.is_dir():
-            raise ValueError("project_root must be an existing directory")
-        if not command or not all(isinstance(item, str) and item for item in command):
-            raise ValueError("command must contain non-empty strings")
-        if timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive")
+            raise BuildError("project_root must be an existing directory")
+        if not command or not all(isinstance(item, str) and item.strip() for item in command):
+            raise BuildError("command must contain non-empty strings")
+        if timeout_seconds <= 0 or timeout_seconds > 3600:
+            raise BuildError("timeout_seconds must be between 1 and 3600")
 
         try:
             completed = subprocess.run(
