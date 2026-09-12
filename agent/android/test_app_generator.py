@@ -82,7 +82,7 @@ class AndroidAppGeneratorTests(unittest.TestCase):
                 generator.generate(plan, directory, approved=True)
 
     def test_rejects_generation_when_requested_capability_is_not_implemented(self) -> None:
-        plan = self._plan("Create a video editor app with offline video editing.")
+        plan = self._plan("Create an accessibility utility app with screen reader tools and offline accessibility service features.")
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(AndroidAppGenerationError):
                 self.generator.generate(plan, directory, approved=True)
