@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import os
 import re
+from datetime import datetime, timezone
 
 from agent.orchestrator import OrchestratedIntake, PipelineOrchestrator
 
@@ -19,6 +22,41 @@ def _validate_project_id(project_id: str) -> str:
             "project_id must be 1-64 characters and contain only letters, numbers, hyphen, or underscore"
         )
     return project_id
+
+
+def _persistent_client_data_allowed() -> bool:
+    return os.getenv("AIAPPBUILDER_ALLOW_PERSISTENT_CLIENT_DATA", "false").strip().lower() == "true"
+
+
+def _require_private_persistence() -> None:
+    if not _persistent_client_data_allowed():
+        raise RuntimeError(
+            "Persistent client data is disabled. Set AIAPPBUILDER_ALLOW_PERSISTENT_CLIENT_DATA=true only in a private, controlled runtime."
+        )
+
+
+def _write_intake_record(state_dir: Path, result, original_request: str) -> None:
+    """Persist the normalized intake needed for deterministic resume, not a re-run of AI intake."""
+    _require_private_persistence()
+    requirements = result.intake.requirements
+    brief = result.intake.client_brief
+    record = {
+        "schema_version": 1,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "project_id": result.orchestrator.project_id,
+        "request_sha256": hashlib.sha256(original_request.encode("utf-8")).hexdigest(),
+        "original_request": requirements.original_request,
+        "normalized_request": requirements.normalized_request,
+        "questions": list(brief.questions) if brief else [],
+        "needs_user_confirmation": result.intake.needs_user_confirmation,
+        "plan": {
+            "build_required": result.intake.plan.build_required,
+            "test_required": result.intake.plan.test_required,
+        },
+    }
+    (state_dir / "intake_record.json").write_text(
+        json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -103,8 +141,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "intake":
-        result = agent.intake(args.request)
-        (state_dir / "pending_request.txt").write_text(args.request, encoding="utf-8")
+        try:
+            result = agent.intake(args.request)
+            _write_intake_record(state_dir, result, args.request)
+            (state_dir / "pending_request.txt").write_text(args.request, encoding="utf-8")
+        except RuntimeError as exc:
+            print(f"ERROR: {exc}")
+            return 2
         _print_intake(result)
         return 0
 
@@ -113,16 +156,28 @@ def main(argv: list[str] | None = None) -> int:
             print("ERROR: explicit approval is required; use --approve after reviewing the intake.")
             return 2
         agent.orchestrator.start()
-        pending = state_dir / "pending_request.txt"
-        if not pending.is_file():
-            print("ERROR: no pending intake request exists. Run 'intake' first.")
+        intake_record = state_dir / "intake_record.json"
+        if not intake_record.is_file():
+            print("ERROR: no persisted intake record exists. Run 'intake' first in a private, controlled runtime.")
             return 2
-        request = pending.read_text(encoding="utf-8").strip()
+        try:
+            record = json.loads(intake_record.read_text(encoding="utf-8"))
+            if record.get("project_id") != args.project_id:
+                print("ERROR: intake record belongs to a different project.")
+                return 2
+            if record.get("needs_user_confirmation"):
+                print("ERROR: clarification questions remain. Resolve them and run 'intake' again.")
+                return 2
+            request = str(record.get("original_request", "")).strip()
+            if not request:
+                print("ERROR: persisted intake record has no original request.")
+                return 2
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            print(f"ERROR: invalid intake record: {exc}")
+            return 2
+        # The orchestrator's persisted state is authoritative; the original request is
+        # retained only as an audit input. Generation is never silently re-intaked.
         intake_result = agent.pipeline.intake(request)
-        if intake_result.needs_user_confirmation:
-            print("ERROR: clarification questions remain. Resolve them and run 'intake' again.")
-            _print_intake(OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator))
-            return 2
         result = OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator)
         output_root = Path(args.work_root).resolve() / args.project_id
         output_root.mkdir(parents=True, exist_ok=True)
