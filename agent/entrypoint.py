@@ -13,32 +13,32 @@ DEFAULT_WORK_ROOT = Path(".agent-work")
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="aiappbuilder",
-        description="AIAppBuilder project agent entrypoint.",
+        description="AIAppBuilder user-facing project agent entrypoint.",
     )
     parser.add_argument("--project-id", default="default-project")
     parser.add_argument("--state-root", default=str(DEFAULT_STATE_ROOT))
     parser.add_argument("--work-root", default=str(DEFAULT_WORK_ROOT))
     sub = parser.add_subparsers(dest="command", required=True)
 
-    intake = sub.add_parser("intake", help="Review and structure a new app request.")
+    intake = sub.add_parser("intake", help="Review and structure an app request.")
     intake.add_argument("request")
 
-    status = sub.add_parser("status", help="Show the persisted lifecycle state.")
+    status = sub.add_parser("status", help="Show persisted lifecycle state.")
     status.add_argument("--json", action="store_true", dest="as_json")
 
     generate = sub.add_parser(
         "generate",
-        help="Generate Android source after explicit approval has been recorded.",
+        help="Generate Android source from the last approved intake.",
     )
     generate.add_argument("--approve", action="store_true")
 
     return parser
 
 
-def _agent(args: argparse.Namespace) -> PipelineOrchestrator:
+def _agent(args: argparse.Namespace) -> tuple[PipelineOrchestrator, Path]:
     state_dir = Path(args.state_root) / args.project_id
     state_dir.mkdir(parents=True, exist_ok=True)
-    return PipelineOrchestrator(args.project_id, state_dir / "orchestrator_state.json")
+    return PipelineOrchestrator(args.project_id, state_dir / "orchestrator_state.json"), state_dir
 
 
 def _print_intake(result) -> None:
@@ -60,7 +60,7 @@ def _print_intake(result) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    agent = _agent(args)
+    agent, state_dir = _agent(args)
 
     if args.command == "status":
         agent.orchestrator.start()
@@ -78,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "intake":
         result = agent.intake(args.request)
+        (state_dir / "pending_request.txt").write_text(args.request, encoding="utf-8")
         _print_intake(result)
         return 0
 
@@ -85,19 +86,38 @@ def main(argv: list[str] | None = None) -> int:
         if not args.approve:
             print("ERROR: explicit approval is required; use --approve after reviewing the intake.")
             return 2
-        agent.orchestrator.start()
-        if agent.orchestrator.current_state == LifecycleState.AWAITING_CONFIRMATION:
-            print("ERROR: unresolved clarification questions remain; run intake again after resolving them.")
-            return 2
-        from agent.pipeline import AgentPipeline
 
-        # Reconstruct a safe generation input from the persisted project state is
-        # intentionally not supported yet: requirements must be supplied through
-        # the intake command in the same execution context. This prevents the
-        # agent from silently inventing requirements.
-        print("ERROR: generation requires a fresh approved intake result in this execution context.")
-        print("Use the GitHub Actions 'generate' workflow after the review/approval step.")
-        return 2
+        agent.orchestrator.start()
+        pending = state_dir / "pending_request.txt"
+        if not pending.is_file():
+            print("ERROR: no pending intake request exists. Run 'intake' first.")
+            return 2
+
+        request = pending.read_text(encoding="utf-8").strip()
+        result = agent.intake(request)
+        if result.intake.needs_user_confirmation:
+            print("ERROR: clarification questions remain. Resolve them and run 'intake' again.")
+            _print_intake(result)
+            return 2
+
+        output_root = Path(args.work_root) / args.project_id
+        output_root.mkdir(parents=True, exist_ok=True)
+        generated = agent.approve_and_generate(result, output_root)
+        print(
+            json.dumps(
+                {
+                    "status": "GENERATED",
+                    "project_id": args.project_id,
+                    "project_root": str(generated.project.root),
+                    "files": list(generated.features.files),
+                    "lifecycle_state": agent.orchestrator.current_state.value,
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
 
     return 2
 
