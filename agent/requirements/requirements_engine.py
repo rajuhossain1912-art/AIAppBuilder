@@ -37,6 +37,7 @@ class RequirementEngine:
     ACCESSIBILITY_HINTS = (
         "talkback",
         "accessibility",
+        "accessible",
         "screen reader",
         "blind",
         "visually impaired",
