@@ -101,3 +101,5 @@ jobs:
         with:
           name: aiappbuilder-ci-debug-apk
           path: build/ci-android-app/app/build/outputs/apk/debug/app-debug.apk
+
+# CI trigger verification: keep Android generator/build checks active on main.
