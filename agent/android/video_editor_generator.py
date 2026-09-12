@@ -144,7 +144,8 @@ import java.nio.ByteBuffer;
 """
         source = self._insert_before_class_close(source, methods)
         callback = "        handleVideoActivityResult(requestCode, resultCode, data);\n"
-        if "protected void onActivityResult(int requestCode, int resultCode, Intent data)" in source:
+        signature = "    protected void onActivityResult(int requestCode, int resultCode, Intent data) {"
+        if signature in source:
             source = source.replace("        super.onActivityResult(requestCode, resultCode, data);", "        super.onActivityResult(requestCode, resultCode, data);\n" + callback, 1)
         else:
             activity_result = """    @Override
