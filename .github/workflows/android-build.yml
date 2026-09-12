@@ -23,7 +23,12 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from agent.pipeline import AgentPipeline
-          from agent.verification import AndroidAccessibilityVerifier, VerificationStatus
+          from agent.verification import (
+              AndroidAccessibilityVerifier,
+              AndroidCompletenessVerifier,
+              CompletenessStatus,
+              VerificationStatus,
+          )
 
           request = 'Create an accessible calculator app that works offline.'
           pipeline = AgentPipeline()
@@ -40,6 +45,8 @@ jobs:
           assert 'setContentDescription' in source
           accessibility = AndroidAccessibilityVerifier().verify_source('ci-project', source_path)
           assert accessibility.final_status == VerificationStatus.VERIFIED
+          completeness = AndroidCompletenessVerifier().verify_project('ci-project', generated.project.root)
+          assert completeness.status == CompletenessStatus.VERIFIED, completeness.findings
           PY
 
       - name: Set up Java
