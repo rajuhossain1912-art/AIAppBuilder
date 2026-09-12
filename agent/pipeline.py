@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from agent.android import AndroidAppGenerator, GeneratedAndroidApp
+from agent.android import AndroidAppGenerationError, AndroidAppGenerator, GeneratedAndroidApp
 from agent.client import ClientOrderBrief, ClientOrderIntake
 from agent.planning import PlanningEngine, ProjectPlan
 from agent.requirements import RequirementSet
@@ -41,9 +41,13 @@ class AgentPipeline:
         output_root: str | Path,
         approved: bool = False,
     ) -> GeneratedAndroidApp:
-        """Generate Android source only after explicit approval."""
+        """Generate Android source only after clarification and explicit approval."""
         if not isinstance(intake_result, IntakeResult):
             raise TypeError("intake_result must be an IntakeResult")
+        if intake_result.needs_user_confirmation:
+            raise AndroidAppGenerationError(
+                "Clarifying questions must be resolved before Android generation."
+            )
         return self.android_generator.generate(
             intake_result.plan,
             output_root,
