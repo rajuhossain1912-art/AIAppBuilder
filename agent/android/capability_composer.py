@@ -30,7 +30,9 @@ class AndroidCapabilityComposer:
     })
 
     def compose(self, intent: AndroidBuildIntent) -> ComposedAndroidScreen:
-        capabilities = tuple(intent.capabilities) or ("general",)
+        # A planner may contribute the same capability more than once. Generate
+        # each capability section once so Java local variables never collide.
+        capabilities = tuple(dict.fromkeys(intent.capabilities)) or ("general",)
         sections: list[str] = []
         imports = {
             "import android.app.Activity;",
