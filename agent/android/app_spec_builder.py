@@ -76,12 +76,12 @@ class AndroidBuildIntentBuilder:
     @staticmethod
     def _family(plan: ProjectPlan) -> str:
         text = " ".join(plan.functional_requirements + [plan.goal]).lower()
+        if any(token in text for token in ("api", "server", "http")):
+            return "api_client"
         if any(token in text for token in ("form", "login", "register", "submit")):
             return "form"
         if any(token in text for token in ("database", "record", "inventory", "data")):
             return "database"
-        if any(token in text for token in ("api", "server", "http")):
-            return "api_client"
         if any(token in text for token in ("article", "news", "content", "blog")):
             return "content"
         if any(token in text for token in ("calculator", "converter", "utility", "tool")):
