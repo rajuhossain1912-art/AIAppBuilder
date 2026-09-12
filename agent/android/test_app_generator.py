@@ -39,6 +39,35 @@ class AndroidAppGeneratorTests(unittest.TestCase):
             self.assertIn("Double.parseDouble", source)
             self.assertIn("setContentDescription", source)
 
+    def test_global_accessibility_gate_rejects_unlabeled_interactive_source(self) -> None:
+        class InaccessibleGenerator:
+            def generate(self, project_root, intent):
+                activity = Path(project_root) / "app" / "src" / "main" / "java" / Path(*intent.spec.package_name.split(".")) / "MainActivity.java"
+                activity.parent.mkdir(parents=True, exist_ok=True)
+                activity.write_text(
+                    "import android.widget.Button;\nButton action = new Button(this);\n",
+                    encoding="utf-8",
+                )
+                from agent.android.feature_generator import GeneratedAndroidFeatures
+                return GeneratedAndroidFeatures(
+                    files=(str(activity.relative_to(project_root)),),
+                    family=intent.family,
+                    capabilities=intent.capabilities,
+                    implemented_capabilities=intent.capabilities,
+                )
+
+        plan = self._plan("Create an accessible calculator app that works fully offline.")
+        generator = AndroidAppGenerator(feature_generator=InaccessibleGenerator())
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(AndroidAppGenerationError):
+                generator.generate(plan, directory, approved=True)
+
+    def test_rejects_generation_when_requested_capability_is_not_implemented(self) -> None:
+        plan = self._plan("Create a video editor app with offline video editing.")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(AndroidAppGenerationError):
+                self.generator.generate(plan, directory, approved=True)
+
     def test_performance_preflight_rejects_blocking_source(self) -> None:
         class BlockingGenerator:
             def generate(self, project_root, intent):
