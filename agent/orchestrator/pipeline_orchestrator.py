@@ -8,6 +8,7 @@ from agent.build import BuildEngine, BuildResult
 from agent.delivery import DeliveryEngine, DeliveryGate, DeliveryResult
 from agent.pipeline import AgentPipeline, IntakeResult
 from agent.review import ReviewEngine, ReviewReport
+from agent.security import PrivacyGuard
 from agent.test import TestEngine, TestResult
 from agent.verification import (
     AndroidAccessibilityVerifier,
@@ -54,6 +55,7 @@ class PipelineOrchestrator:
         self.accessibility_verifier = AndroidAccessibilityVerifier()
         self.completeness_verifier = AndroidCompletenessVerifier()
         self.compatibility_verifier = AndroidCompatibilityVerifier()
+        self.privacy_guard = PrivacyGuard()
         self.delivery_engine = DeliveryEngine()
 
     def intake(self, user_request: str) -> OrchestratedIntake:
@@ -139,6 +141,7 @@ class PipelineOrchestrator:
         test: TestResult
         verification: VerificationReport
         accessibility_ok = compatibility_ok = completeness_ok = False
+        privacy_ok = False
 
         while True:
             self.orchestrator.transition_to(LifecycleState.BUILDING)
@@ -191,8 +194,16 @@ class PipelineOrchestrator:
             completeness_ok = self.completeness_verifier.verify_project(
                 self.orchestrator.state.project_id, root
             ).status == "VERIFIED"
+            privacy_report = self.privacy_guard.inspect_source(root, review_paths)
+            privacy_ok = privacy_report.passed
 
-            if verification.final_status == "VERIFIED" and accessibility_ok and compatibility_ok and completeness_ok:
+            if (
+                verification.final_status == "VERIFIED"
+                and accessibility_ok
+                and compatibility_ok
+                and completeness_ok
+                and privacy_ok
+            ):
                 self.orchestrator.complete_task("verification")
                 self.orchestrator.record_verified_result("artifact_sha256")
                 break
@@ -214,6 +225,7 @@ class PipelineOrchestrator:
             tests_passed=test.success,
             review_blockers_resolved=not review.blocking,
             security_ok=not any(f.category == "SECURITY" and f.severity in {"CRITICAL", "HIGH"} for f in review.findings),
+            privacy_ok=privacy_ok,
             accessibility_ok=accessibility_ok,
             compatibility_ok=compatibility_ok and completeness_ok,
             artifact_verified=verification.final_status == "VERIFIED",
@@ -233,6 +245,7 @@ class PipelineOrchestrator:
                 "accessibility": accessibility_ok,
                 "compatibility": compatibility_ok,
                 "completeness": completeness_ok,
+                "privacy": privacy_ok,
                 "authorized": authorized,
             },
         )
