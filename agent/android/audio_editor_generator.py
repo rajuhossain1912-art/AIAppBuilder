@@ -10,7 +10,7 @@ class AudioEditorGenerationResult:
 
 
 class AudioEditorGenerator:
-    """Adds a real, dependency-free Android audio trim/split/export surface."""
+    """Adds a dependency-free Android audio trim/split/preview/export surface."""
 
     OPERATIONS = ("pick_audio", "preview", "trim", "split", "export")
 
@@ -143,18 +143,14 @@ import java.nio.ByteBuffer;
 
 """
         source = self._insert_before_class_close(source, methods)
-        callback = "        handleAudioActivityResult(requestCode, resultCode, data);\n"
-        if "protected void onActivityResult(int requestCode, int resultCode, Intent data)" in source:
-            source = source.replace("        super.onActivityResult(requestCode, resultCode, data);", "        super.onActivityResult(requestCode, resultCode, data);\n" + callback, 1)
-        else:
-            activity_result = """    @Override
+        activity_result = """    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         handleAudioActivityResult(requestCode, resultCode, data);
     }
 
 """
-            source = self._insert_before_class_close(source, activity_result)
+        source = self._insert_before_class_close(source, activity_result)
         return AudioEditorGenerationResult(source=source, operations=self.OPERATIONS)
 
     @staticmethod
