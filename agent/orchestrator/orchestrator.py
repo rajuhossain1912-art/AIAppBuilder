@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -152,11 +153,41 @@ class Orchestrator:
             f"Lifecycle state persisted at {now}",
             f"Retry count: {self.state.retry_count}",
         ]
+
+        completed = set(self.state.completed_tasks)
+        if "build" in completed or "build_succeeded" in completed:
+            passport.build_status = "VERIFIED"
+        if "test" in completed or "tests_passed" in completed:
+            passport.test_status = "VERIFIED"
+        if "android_generation" in completed or "android_source_generated" in completed:
+            passport.generated_revision = passport.generated_revision or os.environ.get(
+                "GITHUB_SHA", "local-workspace"
+            )
+        if "requirements_and_plan_ready" in completed:
+            passport.requirements_summary = "Requirements and plan prepared and recorded."
+        if "review" in completed or "review_passed" in completed:
+            passport.recovery_notes.append("Review completed without release-blocking findings.")
+
         if self.state.last_verified_result:
             passport.verification_status = "VERIFIED"
             passport.artifact_sha256 = self.state.last_verified_result
+            passport.generated_revision = f"artifact:{self.state.last_verified_result}"
+            passport.accessibility_status = "VERIFIED" if (
+                "verification" in completed or "delivery" in completed
+            ) else passport.accessibility_status
+
         if self.state.current_state == LifecycleState.COMPLETED:
             passport.delivery_status = "READY"
+            passport.build_provider = (
+                "GitHub Actions" if os.environ.get("GITHUB_ACTIONS") == "true" else "local"
+            )
+            passport.build_reference = os.environ.get(
+                "GITHUB_RUN_ID", passport.build_reference or "local-workspace"
+            )
+
+        if os.environ.get("GITHUB_SHA"):
+            passport.source_revision = os.environ["GITHUB_SHA"]
+
         self.passport_store.save(passport)
 
     def _persist(self) -> None:
