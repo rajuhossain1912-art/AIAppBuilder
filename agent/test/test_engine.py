@@ -23,16 +23,22 @@ class TestReport:
     def passed(self) -> bool:
         return bool(self.results) and all(result.success for result in self.results)
 
+    def add(self, result: TestResult) -> None:
+        self.results.append(result)
+
 
 class TestEngine:
-    """Executes explicitly selected project tests and records actual results."""
+    """Executes explicitly selected tests and records actual results."""
 
     def run(self, project_root: str | Path, command: Sequence[str], timeout_seconds: int = 900) -> TestResult:
         root = Path(project_root).resolve()
         if not root.is_dir():
             raise ValueError("project_root must be an existing directory")
-        if not command or not all(isinstance(item, str) and item for item in command):
+        if not command or not all(isinstance(item, str) and item.strip() for item in command):
             raise ValueError("command must contain non-empty strings")
+        if timeout_seconds <= 0 or timeout_seconds > 3600:
+            raise ValueError("timeout_seconds must be between 1 and 3600")
+
         try:
             completed = subprocess.run(
                 list(command), cwd=root, capture_output=True, text=True,
