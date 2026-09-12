@@ -32,6 +32,13 @@ class ProjectPassportTest(unittest.TestCase):
             artifact_sha256="a" * 64,
             completed_operations=["generation", "build", "test"],
             recovery_notes=["Restore from source revision abc123"],
+            audit_log=[
+                {
+                    "timestamp": "2026-09-12T01:00:00+00:00",
+                    "state": "VERIFYING",
+                    "current_task": "verification",
+                }
+            ],
         )
 
         restored = ProjectPassport.from_json(passport.to_json())
@@ -49,7 +56,18 @@ class ProjectPassportTest(unittest.TestCase):
             restored = store.load()
             self.assertEqual(restored.project_id, "demo-002")
             self.assertEqual(restored.project_name, "Test App")
-            self.assertEqual(restored.schema_version, 1)
+            self.assertEqual(restored.schema_version, 2)
+
+    def test_schema_v1_migrates_to_schema_v2(self) -> None:
+        restored = ProjectPassport.from_dict(
+            {
+                "schema_version": 1,
+                "project_id": "legacy",
+                "project_name": "Legacy App",
+            }
+        )
+        self.assertEqual(restored.schema_version, 2)
+        self.assertEqual(restored.audit_log, [])
 
     def test_invalid_schema_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
@@ -58,6 +76,17 @@ class ProjectPassportTest(unittest.TestCase):
                     "schema_version": 99,
                     "project_id": "demo",
                     "project_name": "Demo",
+                }
+            )
+
+    def test_invalid_audit_entry_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            ProjectPassport.from_dict(
+                {
+                    "schema_version": 2,
+                    "project_id": "demo",
+                    "project_name": "Demo",
+                    "audit_log": ["not-an-object"],
                 }
             )
 
