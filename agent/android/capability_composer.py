@@ -28,7 +28,6 @@ class AndroidCapabilityComposer:
             "import android.widget.EditText;",
             "import android.widget.LinearLayout;",
             "import android.widget.TextView;",
-            "import java.util.Locale;",
         }
         state: list[str] = []
         methods: list[str] = []
@@ -51,9 +50,17 @@ class AndroidCapabilityComposer:
         source += "\n    @Override\n    protected void onCreate(Bundle savedInstanceState) {\n"
         source += "        super.onCreate(savedInstanceState);\n"
         source += f'        root = base("{title}");\n        status = label("Ready");\n        root.addView(status);\n'
+        if "audio" in capabilities:
+            source += '        tts = new TextToSpeech(this, result -> { if (result == TextToSpeech.SUCCESS) tts.setLanguage(java.util.Locale.getDefault()); });\n'
         source += "\n".join(f"        {line}" for line in sections) + "\n"
         source += "        setContentView(root);\n    }\n\n"
-        source += """    private LinearLayout base(String title) {
+        source += """    @Override
+    protected void onDestroy() {
+        if (tts != null) tts.shutdown();
+        super.onDestroy();
+    }
+
+    private LinearLayout base(String title) {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
         view.setPadding(32, 32, 32, 32);
@@ -115,32 +122,36 @@ class AndroidCapabilityComposer:
         root.addView(calculate);""",
                 set(), [], [],
             )
-        if capability in {"audio", "video", "image", "news", "education", "sports", "profile", "business", "text_content", "forms_data", "online_service", "calendar", "general"}:
-            labels = {
-                "audio": "Audio and voice capability",
-                "video": "Video capability",
-                "image": "Image capability",
-                "news": "News and newspaper capability",
-                "education": "Education and scholarship capability",
-                "sports": "Sports capability",
-                "profile": "Profile and portfolio capability",
-                "business": "Business and merchant capability",
-                "text_content": "Text and content capability",
-                "forms_data": "Forms and data capability",
-                "online_service": "Online service capability",
-                "calendar": "Calendar capability",
-                "general": "General application capability",
-            }
-            block = f'''TextView {capability.replace("-", "_")} = label("{labels[capability]} is included in this composed app.");
-        root.addView({capability.replace("-", "_")});'''
-            if capability == "audio":
-                block += '''
+
+        labels = {
+            "audio": "Audio and voice capability",
+            "video": "Video capability",
+            "image": "Image capability",
+            "news": "News and newspaper capability",
+            "education": "Education and scholarship capability",
+            "sports": "Sports capability",
+            "profile": "Profile and portfolio capability",
+            "business": "Business and merchant capability",
+            "text_content": "Text and content capability",
+            "forms_data": "Forms and data capability",
+            "online_service": "Online service capability",
+            "calendar": "Calendar capability",
+            "general": "General application capability",
+        }
+        if capability not in labels:
+            capability = "general"
+        variable = capability.replace("-", "_")
+        block = f'''TextView {variable} = label("{labels[capability]} is included in this composed app.");
+        root.addView({variable});'''
+
+        if capability == "audio":
+            block += '''
         EditText voiceText = input("Text to speak");
         root.addView(voiceText);
         Button speak = button("Speak");
         speak.setOnClickListener(v -> speakText(voiceText.getText().toString()));
         root.addView(speak);'''
-                return block, set(), ["private TextToSpeech tts;"], ["""    private void speakText(String text) {
+            return block, set(), ["private TextToSpeech tts;"], ["""    private void speakText(String text) {
         if (tts == null) {
             status.setText("Text to speech is not ready");
             return;
@@ -149,13 +160,30 @@ class AndroidCapabilityComposer:
         status.setText("Speaking");
     }
 """]
-            if capability == "calendar":
-                block += '''
+
+        if capability == "forms_data":
+            block += '''
+        EditText name = input("Name");
+        root.addView(name);
+        Button submit = button("Submit");
+        submit.setOnClickListener(v -> {
+            String value = name.getText().toString().trim();
+            if (value.isEmpty()) {
+                status.setText("Name is required");
+                name.requestFocus();
+                return;
+            }
+            status.setText("Saved: " + value);
+        });
+        root.addView(submit);'''
+
+        if capability == "calendar":
+            block += '''
         Button today = button("Show today's date");
         today.setOnClickListener(v -> status.setText(java.time.LocalDate.now().toString()));
         root.addView(today);'''
-            return block, set(), [], []
-        return AndroidCapabilityComposer._section("general")
+
+        return block, set(), [], []
 
 
 def _java(value: str) -> str:
