@@ -13,11 +13,12 @@ class AndroidBuildIntent:
 
     spec: AndroidProjectSpec
     family: str
+    capabilities: tuple[str, ...]
     rationale: tuple[str, ...]
 
 
 class AndroidBuildIntentBuilder:
-    """Converts a conservative project plan into deterministic Android metadata."""
+    """Converts a project plan into composable Android implementation metadata."""
 
     def build(self, plan: ProjectPlan) -> AndroidBuildIntent:
         if not isinstance(plan, ProjectPlan):
@@ -27,14 +28,19 @@ class AndroidBuildIntentBuilder:
         package = self._package_name(name)
         mode = self._mode(plan)
         family = self._family(plan)
+        capabilities = tuple(dict.fromkeys(plan.capabilities)) or ("general",)
 
-        rationale: list[str] = []
+        rationale: list[str] = [
+            "Android generation is capability-composable; legacy family is retained only for compatibility."
+        ]
         if plan.accessibility_requirements:
             rationale.append("Accessibility requirements are carried into the Android specification.")
         if plan.security_requirements or plan.privacy_requirements:
             rationale.append("Security and privacy requirements remain mandatory implementation constraints.")
         if plan.research_required:
             rationale.append("Research is required before implementation when requirements remain unresolved.")
+        if any(cap in {"audio", "video", "image", "online_service"} for cap in capabilities):
+            rationale.append("Media and online capabilities require real supported integrations; unavailable backends must not be simulated.")
 
         return AndroidBuildIntent(
             spec=AndroidProjectSpec(
@@ -44,6 +50,7 @@ class AndroidBuildIntentBuilder:
                 accessibility_required=bool(plan.accessibility_requirements),
             ),
             family=family,
+            capabilities=capabilities,
             rationale=tuple(rationale),
         )
 
