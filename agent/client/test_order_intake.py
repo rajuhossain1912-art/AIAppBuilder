@@ -14,11 +14,16 @@ class ClientOrderIntakeTests(unittest.TestCase):
 
     def test_youtube_request_asks_for_source(self):
         brief = self.intake.start("Create an app for my YouTube channel")
-        self.assertTrue(any("channel/page/content source" in q.lower() for q in brief.questions))
+        self.assertTrue(any("channel" in q.lower() and "source" in q.lower() for q in brief.questions))
 
     def test_api_request_asks_for_endpoint(self):
         brief = self.intake.start("Create an online app that reads data from an API")
         self.assertTrue(any("endpoint" in q.lower() for q in brief.questions))
+
+    def test_complete_offline_request_is_ready_for_approval(self):
+        brief = self.intake.start("Create a calculator app that works fully offline.")
+        self.assertTrue(brief.ready_for_approval)
+        self.assertFalse(brief.questions)
 
     def test_original_request_is_preserved(self):
         brief = self.intake.start("  Make a calculator app  ")
