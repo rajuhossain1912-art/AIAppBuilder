@@ -4,17 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
-from agent.orchestrator import LifecycleState, OrchestratedIntake, PipelineOrchestrator
+from agent.orchestrator import OrchestratedIntake, PipelineOrchestrator
 
 DEFAULT_STATE_ROOT = Path("memory/runtime")
 DEFAULT_WORK_ROOT = Path(".agent-work")
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="aiappbuilder",
-        description="AIAppBuilder user-facing project agent entrypoint.",
-    )
+    parser = argparse.ArgumentParser(prog="aiappbuilder", description="AIAppBuilder user-facing project agent entrypoint.")
     parser.add_argument("--project-id", default="default-project")
     parser.add_argument("--state-root", default=str(DEFAULT_STATE_ROOT))
     parser.add_argument("--work-root", default=str(DEFAULT_WORK_ROOT))
@@ -22,16 +19,13 @@ def _parser() -> argparse.ArgumentParser:
 
     intake = sub.add_parser("intake", help="Review and structure an app request.")
     intake.add_argument("request")
-
     status = sub.add_parser("status", help="Show persisted lifecycle state.")
     status.add_argument("--json", action="store_true", dest="as_json")
-
-    generate = sub.add_parser(
-        "generate",
-        help="Generate Android source from the last approved intake.",
-    )
+    generate = sub.add_parser("generate", help="Generate Android source from the last approved intake.")
     generate.add_argument("--approve", action="store_true")
-
+    release = sub.add_parser("release", help="Run REVIEW -> BUILD -> TEST -> VERIFY -> FIX/RETRY -> DELIVERY.")
+    release.add_argument("--approve", action="store_true")
+    release.add_argument("--max-retries", type=int, default=2)
     return parser
 
 
@@ -49,13 +43,25 @@ def _print_intake(result) -> None:
         "normalized_request": result.intake.requirements.normalized_request,
         "questions": list(brief.questions) if brief else [],
         "needs_user_confirmation": result.intake.needs_user_confirmation,
-        "plan": {
-            "build_required": result.intake.plan.build_required,
-            "test_required": result.intake.plan.test_required,
-        },
+        "plan": {"build_required": result.intake.plan.build_required, "test_required": result.intake.plan.test_required},
         "lifecycle_state": result.orchestrator.current_state.value,
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _review_paths(project_root: Path) -> list[str]:
+    """Review generated source/config/evidence, excluding build caches and generated README text."""
+    paths: list[str] = []
+    for path in sorted(project_root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(project_root)
+        if any(part in {"build", ".gradle"} for part in relative.parts):
+            continue
+        if relative.name == "README.generated.md":
+            continue
+        paths.append(relative.as_posix())
+    return paths
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,40 +92,61 @@ def main(argv: list[str] | None = None) -> int:
         if not args.approve:
             print("ERROR: explicit approval is required; use --approve after reviewing the intake.")
             return 2
-
         agent.orchestrator.start()
         pending = state_dir / "pending_request.txt"
         if not pending.is_file():
             print("ERROR: no pending intake request exists. Run 'intake' first.")
             return 2
-
         request = pending.read_text(encoding="utf-8").strip()
         intake_result = agent.pipeline.intake(request)
         if intake_result.needs_user_confirmation:
             print("ERROR: clarification questions remain. Resolve them and run 'intake' again.")
             _print_intake(OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator))
             return 2
-
-        # The approval is supplied explicitly on this command. The generation
-        # method performs the lifecycle transition and mandatory pre-build gates.
         result = OrchestratedIntake(intake=intake_result, orchestrator=agent.orchestrator)
         output_root = Path(args.work_root) / args.project_id
         output_root.mkdir(parents=True, exist_ok=True)
         generated = agent.approve_and_generate(result, output_root)
-        print(
-            json.dumps(
-                {
-                    "status": "GENERATED",
-                    "project_id": args.project_id,
-                    "project_root": str(generated.project.root),
-                    "files": list(generated.features.files),
-                    "lifecycle_state": agent.orchestrator.current_state.value,
-                },
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
+        print(json.dumps({
+            "status": "GENERATED", "project_id": args.project_id,
+            "project_root": str(generated.project.root), "files": list(generated.features.files),
+            "lifecycle_state": agent.orchestrator.current_state.value,
+        }, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "release":
+        if not args.approve:
+            print("ERROR: explicit approval is required before release execution.")
+            return 2
+        if args.max_retries < 0 or args.max_retries > 5:
+            print("ERROR: --max-retries must be between 0 and 5.")
+            return 2
+        agent.orchestrator.start()
+        project_root = (Path(args.work_root) / args.project_id).resolve()
+        artifact = project_root / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+        if not project_root.is_dir():
+            print("ERROR: generated project does not exist. Run 'generate --approve' first.")
+            return 2
+        try:
+            result = agent.execute_release_cycle(
+                project_root=project_root,
+                review_paths=_review_paths(project_root),
+                build_command=["gradle", "--no-daemon", ":app:assembleDebug"],
+                test_command=["gradle", "--no-daemon", ":app:test"],
+                artifact_path=artifact,
+                authorized=True,
+                max_retries=args.max_retries,
             )
-        )
+        except Exception as exc:
+            print(f"ERROR: release cycle failed: {exc}")
+            return 1
+        print(json.dumps({
+            "status": "DELIVERED", "project_id": args.project_id,
+            "lifecycle_state": agent.orchestrator.current_state.value, "retries": result.retries,
+            "artifact": str(result.delivery.artifact_path), "sha256": result.delivery.checksum_sha256,
+            "delivery_manifest": result.delivery.manifest,
+            "recovery_manifest": str(project_root / "recovery_manifest.json"),
+        }, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
     return 2
