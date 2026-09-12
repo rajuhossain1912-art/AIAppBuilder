@@ -39,6 +39,25 @@ class AndroidAppGeneratorTests(unittest.TestCase):
             self.assertIn("Double.parseDouble", source)
             self.assertIn("setContentDescription", source)
 
+    def test_generates_composable_real_capabilities(self) -> None:
+        plan = self._plan(
+            "Create an accessible app for education, sports, profile, business, news, text content, image, video and online services."
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.generator.generate(plan, directory, approved=True)
+            self.assertTrue(result.features.implemented_capabilities)
+            self.assertFalse(result.features.unsupported_capabilities)
+            source = next(
+                (Path(directory) / relative).read_text(encoding="utf-8")
+                for relative in result.features.files
+                if relative.endswith("MainActivity.java")
+            )
+            self.assertIn("Choose image", source)
+            self.assertIn("Choose video", source)
+            self.assertIn("Open online service", source)
+            self.assertIn("Save content", source)
+            self.assertIn("setContentDescription", source)
+
     def test_global_accessibility_gate_rejects_unlabeled_interactive_source(self) -> None:
         class InaccessibleGenerator:
             def generate(self, project_root, intent):
