@@ -177,12 +177,12 @@ class AndroidCapabilityComposer:
 
         if capability == "forms_data":
             block += '''
-        EditText name = input("Name");
-        root.addView(name);
+        EditText formName = input("Name");
+        root.addView(formName);
         Button submit = button("Submit");
         submit.setOnClickListener(v -> {
-            String value = name.getText().toString().trim();
-            if (value.isEmpty()) { status.setText("Name is required"); name.requestFocus(); return; }
+            String value = formName.getText().toString().trim();
+            if (value.isEmpty()) { status.setText("Name is required"); formName.requestFocus(); return; }
             status.setText("Saved: " + value);
         });
         root.addView(submit);'''
@@ -194,28 +194,30 @@ class AndroidCapabilityComposer:
         root.addView(today);'''
 
         if capability in {"text_content", "profile", "business", "education", "sports"}:
-            block += '''
-        EditText content = input("Write content");
-        content.setSingleLine(false);
-        root.addView(content);
-        Button save = button("Save content");
-        save.setOnClickListener(v -> status.setText("Content saved in this session"));
-        root.addView(save);'''
+            suffix = capability.replace("_", "")
+            block += f'''
+        EditText {suffix}Content = input("Write content");
+        {suffix}Content.setSingleLine(false);
+        root.addView({suffix}Content);
+        Button {suffix}Save = button("Save content");
+        {suffix}Save.setOnClickListener(v -> status.setText("Content saved in this session"));
+        root.addView({suffix}Save);'''
 
         if capability in {"news", "online_service"}:
-            block += '''
-        EditText address = input("Web address");
-        root.addView(address);
-        Button open = button("Open online service");
-        open.setOnClickListener(v -> {
-            String value = address.getText().toString().trim();
-            if (!value.startsWith("https://") && !value.startsWith("http://")) {
+            suffix = capability.replace("_", "")
+            block += f'''
+        EditText {suffix}Address = input("Web address");
+        root.addView({suffix}Address);
+        Button {suffix}Open = button("Open online service");
+        {suffix}Open.setOnClickListener(v -> {{
+            String value = {suffix}Address.getText().toString().trim();
+            if (!value.startsWith("https://") && !value.startsWith("http://")) {{
                 status.setText("Enter a valid web address");
                 return;
-            }
+            }}
             startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(value)));
-        });
-        root.addView(open);'''
+        }});
+        root.addView({suffix}Open);'''
 
         if capability == "image":
             block += '''
@@ -230,20 +232,21 @@ class AndroidCapabilityComposer:
         root.addView(pickVideo);'''
 
         if capability in {"music", "instrument"}:
-            block += '''
-        TextView noteHelp = label("Playable tone instrument. Each button produces a synthesized note.");
-        root.addView(noteHelp);
-        LinearLayout notes = new LinearLayout(this);
-        notes.setOrientation(LinearLayout.VERTICAL);
-        String[] names = {"C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"};
-        double[] frequencies = {261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25};
-        for (int i = 0; i < names.length; i++) {
-            final double frequency = frequencies[i];
-            Button note = button(names[i]);
-            note.setOnClickListener(v -> playTone(frequency, 260));
-            notes.addView(note);
-        }
-        root.addView(notes);'''
+            suffix = capability.replace("_", "")
+            block += f'''
+        TextView {suffix}NoteHelp = label("Playable tone instrument. Each button produces a synthesized note.");
+        root.addView({suffix}NoteHelp);
+        LinearLayout {suffix}Notes = new LinearLayout(this);
+        {suffix}Notes.setOrientation(LinearLayout.VERTICAL);
+        String[] {suffix}Names = {{"C4", "D4", "E4", "F4", "G4", "A4", "B4", "C5"}};
+        double[] {suffix}Frequencies = {{261.63, 293.66, 329.63, 349.23, 392.00, 440.00, 493.88, 523.25}};
+        for (int i = 0; i < {suffix}Names.length; i++) {{
+            final double frequency = {suffix}Frequencies[i];
+            Button {suffix}Note = button({suffix}Names[i]);
+            {suffix}Note.setOnClickListener(v -> playTone(frequency, 260));
+            {suffix}Notes.addView({suffix}Note);
+        }}
+        root.addView({suffix}Notes);'''
             return block, set(), [], ["""    private void playTone(double frequency, int durationMs) {
         final int sampleRate = 44100;
         final int sampleCount = (int) (sampleRate * durationMs / 1000.0);
