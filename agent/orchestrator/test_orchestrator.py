@@ -26,12 +26,14 @@ class OrchestratorTest(unittest.TestCase):
             self.assertEqual(passport["project_id"], "project-1")
             self.assertEqual(passport["current_state"], "UNDERSTANDING")
             self.assertFalse(passport["approved"])
+            self.assertGreaterEqual(len(passport["audit_log"]), 1)
 
             first.request_approval("requirements_and_plan")
             first.receive_approval("requirements_and_plan")
             passport = json.loads(passport_path.read_text(encoding="utf-8"))
             self.assertTrue(passport["approved"])
             self.assertIn("requirements_ready", passport["completed_operations"])
+            self.assertTrue(any(entry["state"] == "UNDERSTANDING" for entry in passport["audit_log"]))
 
             second = Orchestrator("project-1", str(state_path))
             restored = second.start()
@@ -60,6 +62,8 @@ class OrchestratorTest(unittest.TestCase):
             self.assertEqual(passport["accessibility_status"], "VERIFIED")
             self.assertEqual(passport["artifact_sha256"], "a" * 64)
             self.assertEqual(passport["generated_revision"], "artifact:" + "a" * 64)
+            self.assertTrue(passport["audit_log"])
+            self.assertEqual(passport["audit_log"][-1]["last_verified_result"], "a" * 64)
 
     def test_invalid_transition_is_blocked(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
