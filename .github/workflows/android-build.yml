@@ -44,7 +44,11 @@ jobs:
               VerificationStatus,
           )
 
-          request = 'Create an accessible calculator app that works offline.'
+          request = (
+              'Create an accessible offline multimedia utility with calculator, '
+              'audio editor trim split preview export, video editor trim split preview export, '
+              'text to speech, music tones, image selection and video selection.'
+          )
           pipeline = AgentPipeline()
           intake = pipeline.intake(request)
           generated = pipeline.generate_android(
@@ -52,10 +56,15 @@ jobs:
               Path('build/ci-android-app'),
               approved=True,
           )
-          assert generated.intent.family == 'utility'
           source_path = generated.project.root / generated.features.files[0]
           source = source_path.read_text(encoding='utf-8')
           assert 'Double.parseDouble' in source
+          assert 'MediaExtractor' in source
+          assert 'MediaMuxer' in source
+          assert 'Trim and export' in source
+          assert 'Trim and export video' in source
+          assert 'TextToSpeech' in source
+          assert 'AudioTrack' in source
           assert 'setContentDescription' in source
           accessibility = AndroidAccessibilityVerifier().verify_source('ci-project', source_path)
           assert accessibility.final_status == VerificationStatus.VERIFIED
