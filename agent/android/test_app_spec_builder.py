@@ -34,6 +34,14 @@ class AndroidBuildIntentBuilderTests(unittest.TestCase):
         self.assertEqual(intent.spec.mode, "online")
         self.assertEqual(intent.family, "api_client")
 
+    def test_api_data_request_stays_api_client(self) -> None:
+        requirements = self.requirements.analyze(
+            "Create an online app that reads customer data from a server API."
+        )
+        plan = self.planning.create_plan(requirements)
+        intent = self.builder.build(plan)
+        self.assertEqual(intent.family, "api_client")
+
     def test_rejects_invalid_plan(self) -> None:
         with self.assertRaises(TypeError):
             self.builder.build(None)  # type: ignore[arg-type]
